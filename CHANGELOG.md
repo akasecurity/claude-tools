@@ -8,6 +8,27 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+## [0.4.0] telemetry opt-in toggles and a lighter research workflow
+
+Makes Claude Code's nonessential-traffic opt-outs individual toggles so Remote
+Control works by default, adds a second research workflow, and refreshes the
+visual assets.
+
+### Added
+- Individual nonessential-traffic toggles, replacing the bundled telemetry
+  opt-out in `secure-settings`. `error-reporting-off`, `feedback-off`, and
+  `feedback-survey-off` ship on by default; `telemetry-off` and `autoupdater-off`
+  are opt-in. `secure-settings` no longer sets `DISABLE_TELEMETRY`, so Remote
+  Control (driving the CLI from a claude.ai session) works out of the box.
+- `secure-research` workflow: an everyday privacy-aware multi-source research
+  path (parallel researchers into a grounded, cited report), lighter than
+  `secure-deep-research`.
+
+### Changed
+- Both research workflows tier their models: search and fetch on Haiku, the
+  adversarial verify on Sonnet, scope and synthesis inherit the session model.
+- Refreshed the what's-inside graphic and deck for the fifteen additions.
+
 ## [0.3.0] — guard hardening + agent-driven alias & migration
 
 Closes several command-guard bypasses surfaced in review, adds agent-driven alias
@@ -110,7 +131,8 @@ state before the v0.2.0 public-ready prep.
 Initial internal deployment of the isolated-profile installer, the secure-defaults
 base, and the guard hooks.
 
-[Unreleased]: https://github.com/alsoknownassecurity/aka-claude-tools/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/alsoknownassecurity/aka-claude-tools/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/alsoknownassecurity/aka-claude-tools/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/alsoknownassecurity/aka-claude-tools/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alsoknownassecurity/aka-claude-tools/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/alsoknownassecurity/aka-claude-tools/compare/v0.1.0...v0.1.1
