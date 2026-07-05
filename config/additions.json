@@ -4,17 +4,17 @@
     {
       "id": "secure-settings",
       "name": "Secure base settings",
-      "prompt": "Secure base settings (deny credential reads, telemetry off)?",
+      "prompt": "Secure base settings (deny credential reads)?",
       "recommended": true,
-      "description": "Deny-reads on credential paths (~/.ssh, ~/.aws, .env, keychains, …) and disables nonessential telemetry/feedback traffic. Always safe to layer on.",
+      "description": "Deny-reads on credential paths (~/.ssh, ~/.aws, .env, keychains, …) plus conventional env/attribution defaults. Always safe to layer on. Nonessential-traffic opt-outs (telemetry/error-reporting/feedback) are NOT here. They live in the opt-in `telemetry-off` addition, so Remote Control works by default.",
       "settings": "settings.base.json"
     },
     {
       "id": "leak-guard",
       "name": "leak-guard",
-      "prompt": "leak-guard — block secrets + internal identifiers in WEB queries [bun]?",
+      "prompt": "leak-guard: block secrets + internal identifiers in WEB queries [bun]?",
       "recommended": true,
-      "description": "PreToolUse guard on WebSearch/WebFetch and the SearXNG MCP tools (WEB egress only — Bash egress is command-guard's surface). Blocks web queries/urls/prompts containing detected secrets (trufflehog), token/SSH-key shapes, and — if configured — your org's internal identifiers (CT_EGRESS_PATTERNS, read from the install-compiled org-egress.json sidecar; portable-subset regex only). Covers the SearXNG MCP surface so secure-deep-research's sensitive-topic path (routed through self-hosted SearXNG for privacy) is egress-scanned too (a no-op when no SearXNG server is configured). Runs under bun (like command-guard) — a hard dependency: selecting leak-guard aborts the install if bun is absent, rather than shipping a default-on security guard silently disabled.",
+      "description": "PreToolUse guard on WebSearch/WebFetch and the SearXNG MCP tools (WEB egress only, Bash egress is command-guard's surface). Blocks web queries/urls/prompts containing detected secrets (trufflehog), token/SSH-key shapes, and (if configured) your org's internal identifiers (CT_EGRESS_PATTERNS, read from the install-compiled org-egress.json sidecar, portable-subset regex only). Covers the SearXNG MCP surface so secure-deep-research's sensitive-topic path (routed through self-hosted SearXNG for privacy) is egress-scanned too (a no-op when no SearXNG server is configured). Runs under bun (like command-guard), a hard dependency: selecting leak-guard aborts the install if bun is absent, rather than shipping a default-on security guard silently disabled.",
       "hook": "hooks/leak-guard.ts",
       "matcher": "WebSearch|WebFetch|mcp__searxng__",
       "event": "PreToolUse",
@@ -23,9 +23,9 @@
     {
       "id": "command-guard",
       "name": "command-guard",
-      "prompt": "command-guard — sole Bash egress guard: credential exfil, curl|bash, startup-file writes, internal identifiers [bun]?",
+      "prompt": "command-guard, the sole Bash egress guard: credential exfil, curl|bash, startup-file writes, internal identifiers [bun]?",
       "recommended": true,
-      "description": "PreToolUse guard on Bash — the SOLE Bash egress guard (leak-guard is web-only). Denies pipe-to-shell (curl | bash) and writes to shell startup files (~/.zshrc, ~/.bashrc, … — a persistence vector the secure-settings Edit/Write deny can't reach via a Bash redirection); and on outbound commands (curl/wget/nc/…) denies a detected secret (trufflehog), an org internal-identifier match (CT_EGRESS_PATTERNS via the shared sidecar), and a credential key-shape paired with the outbound tool; alerts on nc/socat/sendmail/env-dump/inline-interpreter. Requires bun — a hard dependency: selecting command-guard aborts the install if bun is absent, rather than shipping a default-on security guard silently disabled.",
+      "description": "PreToolUse guard on Bash, the SOLE Bash egress guard (leak-guard is web-only). Denies pipe-to-shell (curl | bash) and writes to shell startup files (~/.zshrc, ~/.bashrc, …, a persistence vector the secure-settings Edit/Write deny can't reach via a Bash redirection). On outbound commands (curl/wget/nc/…) it denies a detected secret (trufflehog), an org internal-identifier match (CT_EGRESS_PATTERNS via the shared sidecar), and a credential key-shape paired with the outbound tool. Alerts on nc/socat/sendmail/env-dump/inline-interpreter. Requires bun, a hard dependency: selecting command-guard aborts the install if bun is absent, rather than shipping a default-on security guard silently disabled.",
       "hook": "hooks/command-guard.ts",
       "matcher": "Bash",
       "event": "PreToolUse",
@@ -34,9 +34,9 @@
     {
       "id": "rtk-safe",
       "name": "rtk-safe",
-      "prompt": "rtk-safe — transparent rtk rewrites on proven-safe commands for token savings [bun; needs rtk]?",
+      "prompt": "rtk-safe: transparent rtk rewrites on proven-safe commands for token savings [bun; needs rtk]?",
       "recommended": true,
-      "description": "PreToolUse rewrite on Bash. Transparently rewrites git/gh/cat/ls/find/npm/docker/etc. to compact `rtk` equivalents for token savings. Runs under bun (like command-guard); self-skips at runtime if rtk is absent, so it's inert until you install rtk. Also installs a strictly read-only rtk allowlist (rtk-allowlist.json) so rewritten read commands don't add prompt friction; mutating/egress forms still prompt.",
+      "description": "PreToolUse rewrite on Bash. Transparently rewrites git/gh/cat/ls/find/npm/docker/etc. to compact `rtk` equivalents for token savings. Runs under bun (like command-guard). Self-skips at runtime if rtk is absent, so it's inert until you install rtk. Also installs a strictly read-only rtk allowlist (rtk-allowlist.json) so rewritten read commands don't add prompt friction. Mutating/egress forms still prompt.",
       "hook": "hooks/rtk-safe.ts",
       "settings": "rtk-allowlist.json",
       "matcher": "Bash",
@@ -47,7 +47,7 @@
       "name": "Responsive status line",
       "prompt": "Responsive status line?",
       "recommended": true,
-      "description": "Width-adaptive status line (git, context, usage). Resolves its own config dir, so it works in any isolated config folder. Runs under bun (a hard dependency of this addition, like command-guard) — not a security boundary, so the bun requirement is acceptable.",
+      "description": "Width-adaptive status line (git, context, usage). Resolves its own config dir, so it works in any isolated config folder. Runs under bun (a hard dependency of this addition, like command-guard), not a security boundary, so the bun requirement is acceptable.",
       "statusLine": "hooks/statusline.ts"
     },
     {
@@ -61,17 +61,25 @@
     {
       "id": "secure-deep-research",
       "name": "secure-deep-research",
-      "prompt": "secure-deep-research (privacy-aware multi-source research, sensitive-topic gating)?",
+      "prompt": "secure-deep-research (privacy-aware research with per-claim adversarial verification)?",
       "recommended": false,
-      "description": "Privacy-aware deep-research workflow: fan-out web search -> fetch -> 3-vote adversarial verify -> cited synthesis. The Scope agent classifies privacy sensitivity (conservative); sensitive topics are query-redacted, GATED for confirmation before any external query fires, fan-out-reduced, and routed through a self-hosted SearXNG MCP server (mcp__searxng__*). Normal topics use WebSearch/WebFetch at full fan-out. Model-tiered: Scope+Synthesize inherit the session model, the Search/Fetch/Verify fan-out runs on Sonnet. Placed in <dir>/workflows/ and auto-registers as the /secure-deep-research skill. NOTE: the sensitive-topic path needs a self-hosted SearXNG MCP server configured; without it, only the normal (WebSearch) path works.",
+      "description": "Deep-research workflow with per-claim adversarial verification: search -> fetch -> 3-vote verify -> cited synthesis. Sensitive topics are conservatively classified, query-redacted, GATED for confirmation before any external query fires, fan-out-reduced, and routed through a self-hosted SearXNG MCP server (mcp__searxng__*). Normal topics use WebSearch/WebFetch at full fan-out. Model-tiered: Scope+Synthesize inherit the session model, Search/Fetch run on Haiku, Verify on Sonnet. Auto-registers as the /secure-deep-research skill. NOTE: the sensitive-topic path needs a self-hosted SearXNG MCP server. Without it, only the normal (WebSearch) path works.",
       "workflow": "workflows/secure-deep-research.js"
+    },
+    {
+      "id": "secure-research",
+      "name": "secure-research",
+      "prompt": "secure-research (everyday privacy-aware multi-source research)?",
+      "recommended": false,
+      "description": "Everyday multi-source research workflow (the Claude Research shape): parallel researcher subagents gather cited findings, one bounded gap-check wave, then a grounded synthesis. No adversarial verify tournament, so cheaper than secure-deep-research. Reach for that when claims need per-claim verification. Same privacy handling: sensitive topics are conservatively classified, query-redacted, GATED before any external query, and routed through a self-hosted SearXNG MCP server (mcp__searxng__*). Normal topics use WebSearch/WebFetch. Model-tiered: Scope+Synthesize inherit the session model, researchers run on Haiku, gap-check on Sonnet. Auto-registers as the /secure-research skill. NOTE: the sensitive-topic path needs a self-hosted SearXNG MCP server. Without it, only the normal (WebSearch) path works.",
+      "workflow": "workflows/secure-research.js"
     },
     {
       "id": "harness-pointer",
       "name": "harness-pointer",
       "prompt": "harness-pointer (opt-in, ships disabled+empty)?",
       "recommended": false,
-      "description": "PreToolUse guard on Bash that intercepts org-configured commands and points the agent to the right approach for your environment (e.g. gh -> git). Guidance, not a security boundary. Ships OFF and empty — most engineers want every CLI. Enable + configure via aka-claude-tools.config.",
+      "description": "PreToolUse guard on Bash that intercepts org-configured commands and points the agent to the right approach for your environment (e.g. gh -> git). Guidance, not a security boundary. Ships OFF and empty. Most engineers want every CLI. Enable + configure via aka-claude-tools.config.",
       "hook": "hooks/harness-pointer.sh",
       "matcher": "Bash",
       "event": "PreToolUse",
@@ -82,8 +90,48 @@
       "name": "shell-audit",
       "prompt": "shell-audit (shell startup audit: aliases, secrets, persistence, git drift)?",
       "recommended": true,
-      "description": "Read-only auditor + skill. Walks your shell rc and every file it sources (cycle-safe) and flags: hardcoded credentials (values redacted), persistence-suspicious patterns (pipe-to-shell, eval-of-fetched, DYLD/LD_PRELOAD, writes into other rc files), duplicate or dangling aliases, and git-baseline drift. A detective tripwire for the shell-startup slice — nothing is modified; not a substitute for launchd/cron/ssh review.",
+      "description": "Read-only auditor + skill. Walks your shell rc and every file it sources (cycle-safe) and flags: hardcoded credentials (values redacted), persistence-suspicious patterns (pipe-to-shell, eval-of-fetched, DYLD/LD_PRELOAD, writes into other rc files), duplicate or dangling aliases, and git-baseline drift. A detective tripwire for the shell-startup slice. Nothing is modified. Not a substitute for launchd/cron/ssh review.",
       "skill": "skills/shell-audit"
+    },
+    {
+      "id": "telemetry-off",
+      "name": "telemetry-off",
+      "prompt": "telemetry-off: set DISABLE_TELEMETRY (turns OFF Remote Control)?",
+      "recommended": false,
+      "description": "Opt-in: sets DISABLE_TELEMETRY=1 to opt out of Anthropic operational telemetry. Ships OFF because it disables Claude Code's Remote Control (driving the CLI from a claude.ai session). The default leaves it unset so Remote Control works.",
+      "settings": "settings.telemetry-off.json"
+    },
+    {
+      "id": "error-reporting-off",
+      "name": "error-reporting-off",
+      "prompt": "error-reporting-off: set DISABLE_ERROR_REPORTING?",
+      "recommended": true,
+      "description": "Opt-in: sets DISABLE_ERROR_REPORTING=1 to opt out of Sentry error reporting.",
+      "settings": "settings.error-reporting-off.json"
+    },
+    {
+      "id": "feedback-off",
+      "name": "feedback-off",
+      "prompt": "feedback-off: set DISABLE_FEEDBACK_COMMAND?",
+      "recommended": true,
+      "description": "Opt-in: sets DISABLE_FEEDBACK_COMMAND=1 to disable the /feedback command, which sends conversation history to Anthropic on demand.",
+      "settings": "settings.feedback-off.json"
+    },
+    {
+      "id": "autoupdater-off",
+      "name": "autoupdater-off",
+      "prompt": "autoupdater-off: set DISABLE_AUTOUPDATER (manual `claude update` still works)?",
+      "recommended": false,
+      "description": "Opt-in: sets DISABLE_AUTOUPDATER=1 to stop automatic background updates; `claude update` still works.",
+      "settings": "settings.autoupdater-off.json"
+    },
+    {
+      "id": "feedback-survey-off",
+      "name": "feedback-survey-off",
+      "prompt": "feedback-survey-off: set CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY?",
+      "recommended": true,
+      "description": "Opt-in: sets CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 to disable the 'How is Claude doing?' session quality surveys (telemetry-off already suppresses these).",
+      "settings": "settings.feedback-survey-off.json"
     }
   ]
 }

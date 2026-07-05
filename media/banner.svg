@@ -32,5 +32,5 @@
       <text x="86" y="26" text-anchor="middle" fill="#C3CBFF">guarded exits</text>
     </g>
   </g>
-  <text x="192" y="288" font-family="ui-monospace, 'Geist Mono', monospace" font-size="15" fill="#6B7D8F">MIT  ·  needs jq + bun  ·  side-by-side or in-place, no lock-in</text>
+  <text x="192" y="288" font-family="ui-monospace, 'Geist Mono', monospace" font-size="15" fill="#6B7D8F">MIT  ·  needs jq + bun  ·  side-by-side or in-place</text>
 </svg>

@@ -33,5 +33,5 @@
       <text x="124" y="38" text-anchor="middle" fill="#C3CBFF">guarded exits</text>
     </g>
   </g>
-  <text x="304" y="520" font-family="ui-monospace, 'Geist Mono', monospace" font-size="24" fill="#6B7D8F">MIT  ·  jq + bun  ·  human-run or agent-driven  ·  no lock-in</text>
+  <text x="304" y="520" font-family="ui-monospace, 'Geist Mono', monospace" font-size="24" fill="#6B7D8F">MIT  ·  jq + bun  ·  human-run or agent-driven</text>
 </svg>

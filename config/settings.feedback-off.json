@@ -1,0 +1,9 @@
+{
+  "$comment": [
+    "Maintainer notes, stripped from the merged settings.json by install.sh, never shipped to a user's config.",
+    "Payload for the opt-in `feedback-off` addition. DISABLE_FEEDBACK_COMMAND=1 disables the /feedback command. Independent of Remote Control."
+  ],
+  "env": {
+    "DISABLE_FEEDBACK_COMMAND": "1"
+  }
+}

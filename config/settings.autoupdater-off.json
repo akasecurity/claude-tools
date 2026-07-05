@@ -1,0 +1,9 @@
+{
+  "$comment": [
+    "Maintainer notes, stripped from the merged settings.json by install.sh, never shipped to a user's config.",
+    "Payload for the opt-in `autoupdater-off` addition. DISABLE_AUTOUPDATER=1 stops automatic background updates; `claude update` still works."
+  ],
+  "env": {
+    "DISABLE_AUTOUPDATER": "1"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "$comment": [
+    "Maintainer notes, stripped from the merged settings.json by install.sh, never shipped to a user's config.",
+    "Payload for the opt-in `telemetry-off` addition. Ships OFF: DISABLE_TELEMETRY=1 turns off Claude Code's Remote Control, so the secure base leaves it unset and privacy-first users opt in here."
+  ],
+  "env": {
+    "DISABLE_TELEMETRY": "1"
+  }
+}

@@ -1,26 +1,27 @@
 export const meta = {
   name: 'secure-deep-research',
-  description: 'Privacy-aware deep research harness — fan-out web searches, fetch sources, adversarially verify claims, synthesize a cited report. Sensitive topics are gated, redacted, fan-out-reduced, and routed through self-hosted SearXNG.',
-  whenToUse: 'When the user wants a deep, multi-source, fact-checked research report on any topic. BEFORE invoking, check if the question is specific enough to research directly — if underspecified (e.g., "what car to buy" without budget/use-case/region), ask 2-3 clarifying questions to narrow scope. Then pass the refined question as args, weaving the answers in.',
-  phases: [{"title":"Scope","detail":"Decompose question + classify privacy sensitivity (no web access — safe to run before gating)"},{"title":"Search","detail":"parallel search agents, one per angle","model":"sonnet"},{"title":"Fetch","detail":"URL-dedup, fetch sources, extract falsifiable claims","model":"sonnet"},{"title":"Verify","detail":"3-vote adversarial verification per claim (need 2/3 refutes to kill)","model":"sonnet"},{"title":"Synthesize","detail":"Merge semantic dupes, rank by confidence, cite sources"}],
+  description: 'Deep, fact-checked web research with per-claim adversarial verification, ending in a cited report. Use when the user wants to research, investigate, fact-check, or dig deep into a topic and correctness matters: "deep dive", "verify", "due diligence", "is it true that", "get me sources on". Privacy-aware: sensitive topics are gated, redacted, and routed through self-hosted SearXNG. The rigorous sibling of secure-research. Pick this when claims need verifying, not just grounding.',
+  whenToUse: 'For thorough, verification-grade research where being wrong is costly. If the question is underspecified (e.g. "what car to buy" with no budget/use-case/region), ask 2-3 clarifying questions first, then pass the refined question as args.',
+  phases: [{"title":"Scope","detail":"Decompose question + classify privacy sensitivity (no web access — safe to run before gating)"},{"title":"Search","detail":"parallel search agents, one per angle","model":"haiku"},{"title":"Fetch","detail":"URL-dedup, fetch sources, extract falsifiable claims","model":"haiku"},{"title":"Verify","detail":"3-vote adversarial verification per claim (need 2/3 refutes to kill)","model":"sonnet"},{"title":"Synthesize","detail":"Merge semantic dupes, rank by confidence, cite sources"}],
 }
 
 // secure-deep-research: Scope+triage → [gate?] → pipeline(Search → URL-dedup → Fetch+Extract) → 3-vote Verify → Synthesize
 // Privacy-aware fork of the stock built-in `deep-research` workflow.
 // Ported from bughunter architecture. WebSearch/WebFetch by default.
 //
-// Model tiering: Scope + Synthesize inherit the session model (reasoning-heavy steps); the mechanical
-// fan-out (Search/Fetch/Verify) is pinned to Sonnet to cut token cost without quality loss.
+// Model tiering: Scope + Synthesize inherit the session model (Sonnet/Opus/…): the reasoning-heavy ends.
+// The retrieval fan-out (Search + Fetch) is pinned to Haiku to cut cost. The 3-vote adversarial Verify
+// stays on Sonnet, a last-word gate where Haiku over-refutes and kills true claims.
 //
 // Privacy intelligence: the fan-out amplifies a single topic into ~30 external queries (5 angles +
 // 15 fetches + 25 verifier re-searches), so a sensitive topic gets sprayed across third-party engines
-// many times over. To contain that, the Scope agent classifies sensitivity (conservatively — when in
+// many times over. To contain that, the Scope agent classifies sensitivity (conservatively, when in
 // doubt, sensitive), and for sensitive topics the workflow:
-//   1. REDACTS — Scope generalizes identifying specifics out of the search queries (full question stays internal).
-//   2. GATES — returns the plan for confirmation BEFORE any external query fires (Scope has no web access).
-//   3. REDUCES — fewer angles, fewer fetches, fewer verified claims, and verifier web-search disabled.
-//   4. ROUTES — search + fetch go through self-hosted SearXNG (de-identified vs. upstream engines).
-// NOTE: this de-identifies, it does not cloak — upstream engines still see query text, and the model
+//   1. REDACTS: Scope generalizes identifying specifics out of the search queries (full question stays internal).
+//   2. GATES: returns the plan for confirmation BEFORE any external query fires (Scope has no web access).
+//   3. REDUCES: fewer angles, fewer fetches, fewer verified claims, and verifier web-search disabled.
+//   4. ROUTES: search + fetch go through self-hosted SearXNG (de-identified vs. upstream engines).
+// NOTE: this de-identifies, it does not cloak. Upstream engines still see query text, and the model
 // already has the full question. The redaction + reduced amplification do more for privacy than the
 // engine swap alone.
 //
@@ -127,8 +128,8 @@ if (!QUESTION) {
   return { error: "No research question provided. Pass it as args: Workflow({name: 'secure-deep-research', args: '<question>'}) or args: {question, sensitiveConfirmed, mode}." }
 }
 
-// ─── Phase 0: Scope — decompose question + classify privacy sensitivity ───
-// Pure reasoning, NO web access — safe to run before the gate; nothing leaves the host yet.
+// ─── Phase 0: Scope: decompose question + classify privacy sensitivity ───
+// Pure reasoning, NO web access: safe to run before the gate. Nothing leaves the host yet.
 phase("Scope")
 const scope = await agent(
   "Decompose this research question into complementary search angles, and classify its privacy sensitivity.\n\n" +
@@ -191,7 +192,7 @@ if (SENSITIVE && !sensitiveConfirmed) {
   }
 }
 
-// ─── Dedup state — accumulates across searchers as they complete ───
+// ─── Dedup state: accumulates across searchers as they complete ───
 const normURL = u => {
   try {
     const p = new URL(u)
@@ -253,7 +254,7 @@ const searchResults = await pipeline(
   activeAngles,
 
   angle => agent(SEARCH_PROMPT(angle), {
-    label: "search:" + angle.label, phase: "Search", schema: SEARCH_SCHEMA, model: "sonnet"
+    label: "search:" + angle.label, phase: "Search", schema: SEARCH_SCHEMA, model: "haiku"
   }).then(r => {
     if (!r) return null
     log(angle.label + ": " + r.results.length + " results")
@@ -287,7 +288,7 @@ const searchResults = await pipeline(
           label: "fetch:" + host,
           phase: "Fetch",
           schema: EXTRACT_SCHEMA,
-          model: "sonnet",
+          model: "haiku",
         }).then(ext => {
           // User-skip → null; drop it (filtered by searchResults.flat().filter(Boolean))
           // rather than throwing into .catch() and mislabeling it "unreliable".
@@ -327,7 +328,7 @@ if (rankedClaims.length === 0) {
 }
 
 // ─── Verify: 3-vote adversarial ───
-// Barrier here is intentional — claim pool must be fully assembled before ranking/verification.
+// Barrier here is intentional: claim pool must be fully assembled before ranking/verification.
 phase("Verify")
 const voted = (await parallel(
   rankedClaims.map(claim => () =>
@@ -341,7 +342,7 @@ const voted = (await parallel(
         })
       )
     ).then(verdicts => {
-      // A vote can be null (user-skip or agent error) — treat as abstain.
+      // A vote can be null (user-skip or agent error): treat as abstain.
       const valid = verdicts.filter(Boolean)
       const refuted = valid.filter(v => v.refuted).length
       // Survive only if the claim was actually adjudicated: a quorum of
@@ -402,7 +403,7 @@ const report = await agent(
 )
 
 if (!report) {
-  // Synthesis skipped/errored — salvage the verified claims raw rather
+  // Synthesis skipped/errored: salvage the verified claims raw rather
   // than throwing on report.findings and discarding the whole run.
   return {
     question: QUESTION,

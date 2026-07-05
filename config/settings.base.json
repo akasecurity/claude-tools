@@ -1,14 +1,10 @@
 {
   "$comment": [
-    "Maintainer notes — stripped from the merged settings.json by install.sh; never shipped to a user's config.",
-    "Credential-read denies and telemetry/env defaults are conventional security defaults; they were cross-referenced against trailofbits/claude-code-config.",
-    "Shell-rc Edit/Write denies block the Edit/Write TOOLS (the visible, approvable path) and stop Claude from managing your dotfiles (hand those off via `! <cmd>`). Bash-redirection writes (`echo ... >> ~/.zshrc`) are covered by command-guard.ts, which explicitly denies that vector — the two layers together close the path. Kept as a cheap defense against a persistence vector; drop them if you want Claude editing your rc files."
+    "Maintainer notes, stripped from the merged settings.json by install.sh, never shipped to a user's config.",
+    "Credential-read denies are conventional security defaults. They were cross-referenced against trailofbits/claude-code-config.",
+    "Nonessential-traffic env opt-outs (DISABLE_TELEMETRY et al.) live in the opt-in `telemetry-off` addition, not here, so Remote Control works by default.",
+    "Shell-rc Edit/Write denies block the Edit/Write TOOLS (the visible, approvable path) and stop Claude from managing your dotfiles (hand those off via `! <cmd>`). Bash-redirection writes (`echo ... >> ~/.zshrc`) are covered by command-guard.ts, which explicitly denies that vector. The two layers together close the path. Kept as a cheap defense against a persistence vector. Drop them if you want Claude editing your rc files."
   ],
-  "env": {
-    "DISABLE_TELEMETRY": "1",
-    "DISABLE_ERROR_REPORTING": "1",
-    "DISABLE_FEEDBACK_COMMAND": "1"
-  },
   "attribution": {
     "commit": "",
     "pr": ""

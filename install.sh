@@ -852,6 +852,14 @@ apply_additions() {
   # config_dir is already absolute + $HOME-expanded here.
   local cqd; cqd="$(cfg_token "$config_dir")"
   is_selected secure-settings "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.base.json")"
+  # Opt-in nonessential-traffic opt-outs, each an independent env toggle. Kept OUT of
+  # the secure base because DISABLE_TELEMETRY=1 disables Claude Code's Remote Control;
+  # a user picks whichever they want. Deep merge (`*`) unions each .env onto the rest.
+  is_selected telemetry-off        "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.telemetry-off.json")"
+  is_selected error-reporting-off  "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.error-reporting-off.json")"
+  is_selected feedback-off         "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.feedback-off.json")"
+  is_selected autoupdater-off      "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.autoupdater-off.json")"
+  is_selected feedback-survey-off  "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.feedback-survey-off.json")"
 
   # Shared library the egress guards read (single source of truth for the
   # secret/outbound patterns). Placed whenever either guard is selected, so both
@@ -976,6 +984,12 @@ apply_additions() {
     # workflow and the /secure-deep-research skill (Claude Code scans this dir).
     place_file "$CONFIG_SRC/workflows/secure-deep-research.js" "$config_dir/workflows"
     ok "Placed secure-deep-research workflow ${C_DIM}(invoke: /secure-deep-research)${C_RST}"
+  fi
+  if is_selected secure-research "$_sel_ids"; then
+    # Same mechanism: a .js in <config>/workflows/ auto-registers as the named
+    # workflow and the /secure-research skill.
+    place_file "$CONFIG_SRC/workflows/secure-research.js" "$config_dir/workflows"
+    ok "Placed secure-research workflow ${C_DIM}(invoke: /secure-research)${C_RST}"
   fi
 
   # 4c. opt-in config template if any config-driven hook was selected. command-guard

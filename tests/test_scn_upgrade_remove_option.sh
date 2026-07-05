@@ -6,7 +6,8 @@
 # the user's own perms/env/hooks stay):
 #   • a HOOK addition       (leak-guard → .hooks.PreToolUse registration + file)
 #   • a STATUSLINE addition (statusline → .statusLine + file)
-#   • a PERM+ENV addition   (secure-settings → .permissions.deny + .env, via settings.base.json)
+#   • a PERM addition       (secure-settings → .permissions.deny, via settings.base.json)
+#   • an ENV addition        (telemetry-off → .env, via settings.telemetry-off.json)
 # while OTHER still-selected additions (wrap-up command, harness-pointer hook)
 # stay fully intact, and a second identical re-deselect is a no-op (idempotent).
 # Uses CT_ADDITIONS for a deterministic non-interactive selection, mirroring
@@ -19,14 +20,16 @@ PROFILE="$SB/.claude-aka"
 S="$PROFILE/settings.json"
 run() { CT_ADDITIONS="$1" SHELL=/bin/bash HOME="$SB" bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$SB/log" 2>&1; }
 
-# Pull the kit's actual shipped perm/env footprint for secure-settings so the
-# assertions track the payload rather than hardcoding rule strings.
+# Pull the kit's actual shipped footprint from the manifest so the assertions track
+# the payload rather than hardcoding rule strings: the perm (deny) from secure-settings,
+# the env key from telemetry-off (which now owns the nonessential-traffic env block).
 SETF="$(jq -r '.additions[] | select(.id=="secure-settings") | .settings // ""' "$ADDITIONS")"
+ENVF="$(jq -r '.additions[] | select(.id=="telemetry-off") | .settings // ""' "$ADDITIONS")"
 KIT_DENY="$(jq -r --arg f "$SETF" '.permissions.deny[0] // empty' "$REPO_ROOT/config/$SETF")"
-KIT_ENV_KEY="$(jq -r --arg f "$SETF" '.env | keys[0] // empty' "$REPO_ROOT/config/$SETF")"
+KIT_ENV_KEY="$(jq -r --arg f "$ENVF" '.env | keys[0] // empty' "$REPO_ROOT/config/$ENVF")"
 
-# ── 1. Install the full set: hook + statusLine + perm/env + two keepers ───────
-run "secure-settings leak-guard statusline wrap-up harness-pointer"
+# ── 1. Install the full set: hook + statusLine + perm + env + two keepers ─────
+run "secure-settings telemetry-off leak-guard statusline wrap-up harness-pointer"
 assert_eq "install exits 0" "0" "$?"
 assert_file "X(hook) leak-guard.ts deployed"          "$PROFILE/hooks/leak-guard.ts"
 assert_file "X(statusLine) statusline.ts deployed"   "$PROFILE/hooks/statusline.ts"

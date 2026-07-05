@@ -1,0 +1,9 @@
+{
+  "$comment": [
+    "Maintainer notes, stripped from the merged settings.json by install.sh, never shipped to a user's config.",
+    "Payload for the opt-in `error-reporting-off` addition. DISABLE_ERROR_REPORTING=1 opts out of Sentry error reporting. Independent of Remote Control."
+  ],
+  "env": {
+    "DISABLE_ERROR_REPORTING": "1"
+  }
+}

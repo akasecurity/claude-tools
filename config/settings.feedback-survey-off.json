@@ -1,0 +1,9 @@
+{
+  "$comment": [
+    "Maintainer notes, stripped from the merged settings.json by install.sh, never shipped to a user's config.",
+    "Payload for the opt-in `feedback-survey-off` addition. CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 disables the 'How is Claude doing?' session quality surveys without disabling telemetry, so Remote Control keeps working."
+  ],
+  "env": {
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"
+  }
+}
