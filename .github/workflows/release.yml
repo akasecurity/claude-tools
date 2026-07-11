@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write    # create GitHub Releases and upload assets
+  id-token: write    # npm provenance attestation
+
+jobs:
+  release:
+    name: Build, publish, and release
+    runs-on: ubuntu-latest
+    # Releases must originate ONLY from the PUBLIC repo: the download/Homebrew URLs
+    # below hardcode akasecurity/claude-tools, and `npm publish --provenance`
+    # can only generate a public attestation from a public source repo. This workflow
+    # also ships into the private -dev repo via the dev→public sync, so without this
+    # guard a `v*` tag pushed in -dev would create a release in the wrong repo with
+    # 404 install URLs and a failing provenance publish. The guard makes it a no-op
+    # in -dev and correct in public.
+    if: github.repository == 'akasecurity/claude-tools'
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Extract version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify VERSION file matches tag
+        run: |
+          FILE_VERSION="$(cat VERSION)"
+          TAG_VERSION="${{ steps.ver.outputs.version }}"
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::VERSION file ($FILE_VERSION) does not match git tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+      - name: Set up Node.js for npm publish
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Preflight — validate npm auth before any external artifact is created
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is not set — aborting BEFORE creating the GitHub Release"
+            exit 1
+          fi
+          # Prove the token AUTHENTICATES (not just non-empty): an empty or revoked
+          # token fails here, BEFORE the GitHub Release is created — closing the common
+          # half-fire modes. This is identity only; it does not prove publish rights for
+          # this package name (no non-destructive npm check does), so an authenticated
+          # token that still lacks publish authorization can fail at the publish step.
+          # That window is narrow (the publishing identity is fixed by NPM_TOKEN) and the
+          # gh-release step is idempotent on a re-run of the same tag once the token is fixed.
+          if ! npm whoami >/dev/null 2>&1; then
+            echo "::error::NPM_TOKEN is set but does not authenticate (npm whoami failed) — aborting before the GitHub Release"
+            exit 1
+          fi
+
+      - name: Create distribution tarball
+        id: tarball
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          TARBALL="aka-claude-tools-${VERSION}.tar.gz"
+          STAGEDIR="stage/aka-claude-tools-${VERSION}"
+          mkdir -p "$STAGEDIR"
+          cp -r bin install.sh uninstall.sh shared config \
+            agent-install.md agent-uninstall.md llms.txt \
+            VERSION README.md LICENSE CHANGELOG.md "$STAGEDIR/"
+          tar -czf "$TARBALL" -C stage "aka-claude-tools-${VERSION}"
+          SHA256="$(sha256sum "$TARBALL" | awk '{print $1}')"
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256"   >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: ${{ steps.tarball.outputs.tarball }}
+          generate_release_notes: true
+          body: |
+            ## Installation
+
+            **npm / npx**
+            ```bash
+            npx @akasecurity/claude-tools          # one-shot
+            npm install -g @akasecurity/claude-tools && aka-claude-tools  # permanent
+            ```
+
+            **Homebrew** — update [`packaging/homebrew/aka-claude-tools.rb`](packaging/homebrew/aka-claude-tools.rb) in the tap repo:
+            ```
+            url "https://github.com/akasecurity/claude-tools/releases/download/${{ github.ref_name }}/aka-claude-tools-${{ steps.ver.outputs.version }}.tar.gz"
+            sha256 "${{ steps.tarball.outputs.sha256 }}"
+            ```
+
+            **Direct download**
+            ```bash
+            # SHA-256: ${{ steps.tarball.outputs.sha256 }}
+            curl -fsSLO https://github.com/akasecurity/claude-tools/releases/download/${{ github.ref_name }}/aka-claude-tools-${{ steps.ver.outputs.version }}.tar.gz
+            ```
+
+      - name: Sync package.json version
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

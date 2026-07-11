@@ -1,7 +1,30 @@
 {
-  "name": "aka-claude-tools",
-  "private": true,
-  "description": "Dev-only manifest for typechecking the bun-runtime hooks (command-guard.ts, statusline.ts, rtk-safe.ts). The hooks themselves run with zero dependencies and need no package.json — this exists solely so CI can run `tsc --noEmit` against them.",
+  "name": "@akasecurity/claude-tools",
+  "version": "0.4.0",
+  "publishConfig": { "access": "public" },
+  "description": "Security defaults for Claude Code — clean context, locked-down credentials, guarded egress.",
+  "keywords": ["claude", "claude-code", "security", "ai-safety", "mcp", "hooks"],
+  "homepage": "https://github.com/akasecurity/claude-tools",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/akasecurity/claude-tools.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "aka-claude-tools": "bin/aka-claude-tools"
+  },
+  "files": [
+    "bin/",
+    "install.sh",
+    "uninstall.sh",
+    "shared/",
+    "config/",
+    "agent-install.md",
+    "agent-uninstall.md",
+    "llms.txt",
+    "VERSION",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit"
   },

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# npm/npx bin wrapper — resolves the package root (accounting for npm's global
+# install symlinks) and hands off to install.sh, which self-locates from there.
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do
+  _dir="$(cd "$(dirname "$_self")" && pwd)"
+  _self="$(readlink "$_self")"
+  [[ "$_self" == /* ]] || _self="$_dir/$_self"
+done
+exec "$(cd "$(dirname "$_self")/.." && pwd)/install.sh" "$@"

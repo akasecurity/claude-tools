@@ -39,7 +39,19 @@ Two ways in, same result: a hardened profile launched by its own alias.
 It reads the guide, checks what you already have, migrates it cleanly, and runs the
 installer. Nothing to type.
 
-**Or run it yourself:**
+**Or install via a package manager:**
+
+```bash
+# npm / npx (macOS + Linux)
+npx @akasecurity/claude-tools
+
+# Homebrew (macOS + Linux)
+brew tap akasecurity/tap
+brew install akasecurity/tap/aka-claude-tools
+aka-claude-tools
+```
+
+**Or clone and run:**
 
 ```bash
 git clone git@github.com:akasecurity/claude-tools.git
