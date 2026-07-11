@@ -2,6 +2,9 @@
 
 <p align="center"><img src="media/banner.svg" alt="aka-claude-tools: clean context, locked doors, guarded exits for Claude Code. MIT · needs jq + bun." width="100%"></p>
 
+![version](https://img.shields.io/github/v/tag/akasecurity/claude-tools?label=version&color=blue)
+![license](https://img.shields.io/badge/license-MIT-green)
+
 **Make Claude Code safer to use.** Clean context, locked-down credentials, guarded
 egress. The security defaults Claude Code doesn't ship with, layered onto a profile
 of its own in a few minutes.
@@ -10,7 +13,9 @@ New to this? Hand the repo to Claude and it sets you up. Comfortable in a termin
 Read every hook first. It's all plain shell and TypeScript, MIT, and the guards scan
 locally: nothing is uploaded to run them.
 
-From [akasecurity](https://github.com/akasecurity) · MIT · needs `jq` + `bun`.
+> Also known as `aka-claude-tools` (the npm package, Homebrew formula, and CLI name). Repo: `akasecurity/claude-tools`. The guard-hooks plugin installs as `claude-tools@akasecurity`.
+
+From [akasecurity](https://akasecurity.io) · MIT · needs `jq` + `bun`.
 
 ---
 
