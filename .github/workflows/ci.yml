@@ -48,6 +48,16 @@ jobs:
           done < <(git ls-files '*.json')
           exit $rc
 
+  plugin:
+    name: plugin — build + schema validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Claude Code CLI (for plugin validate)
+        run: npm i -g @anthropic-ai/claude-code || true
+      - name: Build + validate plugin
+        run: bash tools/build-plugin.sh && claude plugin validate --strict plugins/claude-tools
+
   leak-gate:
     name: leak — no new secrets/identifiers
     # PR-only: block a branch that ADDS a secret or operator identifier BEFORE it

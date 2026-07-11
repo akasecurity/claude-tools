@@ -53,6 +53,18 @@ the profile, what to name the launcher, and which pieces to enable, and migrates
 current config in (paths rewritten), so the new profile is a working copy of your setup,
 not a bare sandbox. Prefer a walkthrough? See the [safe-setup carousel](media/decks/safe-setup.pdf).
 
+### Install as a Claude Code plugin (guards into your active profile)
+
+*(The AKA plugin marketplace is being rolled out; once it's live:)* `claude plugin marketplace add akasecurity/marketplace` then `claude plugin install claude-tools@aka` installs the guard hooks (command-guard, leak-guard) into your **active** profile.
+
+- **Requires `bun`.** The guards run under bun. They **fail open** — if bun is missing they never
+  block your work; instead you get one clear "guards INACTIVE" notice at session start. Install bun
+  (https://bun.sh) to activate them.
+- **Plugin ≠ the full kit.** A plugin can't ship the credential-read denies, the `rtk-safe` output
+  rewriter (it needs a `permissions.allow` settings merge a plugin manifest can't apply), or the
+  status line. For the fully hardened, isolated profile, install the full kit — see
+  [Quick start](#quick-start) (npm, Homebrew, or `./install.sh`).
+
 ## See it actually block something
 
 A guard you haven't watched fire is one you're only assuming works. Launch the profile

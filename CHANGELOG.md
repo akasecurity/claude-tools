@@ -8,6 +8,14 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+### Added
+- `claude-tools` Claude Code **plugin** form: the guard hooks (command-guard, leak-guard)
+  installable via `claude plugin install` into your active profile. Generated from
+  `config/additions.json` by `tools/build-plugin.sh`. Guards fail open with a loud SessionStart
+  notice when bun is missing. `rtk-safe` (like `secure-settings` and the status line) stays
+  installer-only — it needs a `permissions.allow` settings merge a plugin manifest can't apply.
+  The isolated-profile installer is unchanged.
+
 ## [0.4.0] telemetry opt-in toggles and a lighter research workflow
 
 Makes Claude Code's nonessential-traffic opt-outs individual toggles so Remote

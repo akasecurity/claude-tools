@@ -17,6 +17,8 @@ node_modules/
 
 # Never let a real config folder or secrets land in the repo
 .claude-*/
+# ...except the plugin manifest dir Claude Code plugins require (not a config folder)
+!plugins/**/.claude-plugin/
 .env
 .credentials.json
 

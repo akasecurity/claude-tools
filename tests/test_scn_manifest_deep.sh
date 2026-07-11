@@ -57,7 +57,10 @@ for cat in skills hooks commands workflows; do
   [ -d "$REPO_ROOT/config/$cat" ] || continue
   for entry in "$REPO_ROOT/config/$cat"/*; do
     [ -e "$entry" ] || continue
-    [ "$(basename "$entry")" = "lib" ] && continue
+    # Shared support dirs + plugin-build assets back the additions but aren't deployable
+    # additions themselves (lib = secret-patterns corpus; bun-hook-launch.sh + preflight.sh
+    # = plugin-only scripts consumed by tools/build-plugin.sh). Skip them.
+    case "$(basename "$entry")" in lib|bun-hook-launch.sh|preflight.sh) continue ;; esac
     rel="$cat/$(basename "$entry")"
     if printf '%s\n' "$declared" | grep -qxF "$rel"; then
       pass "shipped file is declared: $rel"
