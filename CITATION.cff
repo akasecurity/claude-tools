@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use aka-claude-tools, please cite it as below."
+title: aka-claude-tools
+abstract: "Security defaults for Claude Code on an isolated profile: clean context, locked-down credentials, guarded egress. Pick-and-choose guard hooks and a status line."
+type: software
+authors:
+  - family-names: Lin
+    given-names: William
+repository-code: "https://github.com/akasecurity/claude-tools"
+url: "https://akasecurity.io"
+license: MIT
+version: 0.4.0
