@@ -18,20 +18,7 @@
   <text x="300" y="232" font-family="ui-monospace, 'Geist Mono', monospace" font-size="76" font-weight="700" fill="#F6F8F9">aka-claude-tools</text>
   <text x="304" y="296" font-size="36" font-weight="400" fill="#B0C7E2">Security defaults for Claude Code.</text>
   <text x="304" y="346" font-size="36" font-weight="400" fill="#B0C7E2">The clean slate a fresh Claude Code should start from.</text>
-  <!-- Pills -->
-  <g font-size="26" font-weight="600">
-    <g transform="translate(304,402)">
-      <rect width="252" height="58" rx="29" fill="#00E0B8" fill-opacity="0.12" stroke="#00E0B8" stroke-opacity="0.5"/>
-      <text x="126" y="38" text-anchor="middle" fill="#7DF8E2">clean context</text>
-    </g>
-    <g transform="translate(576,402)">
-      <rect width="236" height="58" rx="29" fill="#6AD9FF" fill-opacity="0.12" stroke="#6AD9FF" stroke-opacity="0.5"/>
-      <text x="118" y="38" text-anchor="middle" fill="#A0E7FF">locked doors</text>
-    </g>
-    <g transform="translate(832,402)">
-      <rect width="248" height="58" rx="29" fill="#8A98FF" fill-opacity="0.14" stroke="#8A98FF" stroke-opacity="0.5"/>
-      <text x="124" y="38" text-anchor="middle" fill="#C3CBFF">guarded exits</text>
-    </g>
-  </g>
-  <text x="304" y="520" font-family="ui-monospace, 'Geist Mono', monospace" font-size="24" fill="#6B7D8F">MIT  ·  jq + bun  ·  human-run or agent-driven</text>
+  <!-- Attributes (mono line, replacing pills) -->
+  <text x="304" y="428" font-family="ui-monospace, 'Geist Mono', monospace" font-size="27"><tspan fill="#7DF8E2">clean context</tspan>  ·  <tspan fill="#A0E7FF">locked doors</tspan>  ·  <tspan fill="#C3CBFF">guarded exits</tspan></text>
+  <text x="304" y="476" font-family="ui-monospace, 'Geist Mono', monospace" font-size="24" fill="#6B7D8F">MIT  ·  jq + bun  ·  human-run or agent-driven</text>
 </svg>

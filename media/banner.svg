@@ -7,30 +7,36 @@
   </defs>
   <rect width="1200" height="320" rx="20" fill="url(#bg)"/>
   <rect width="1200" height="6" rx="3" fill="#00E0B8"/>
-  <!-- AKA logo mark -->
-  <g transform="translate(72,96) scale(0.72)" fill="#00E0B8">
+  <g transform="translate(72,92) scale(0.72)" fill="#00E0B8">
     <circle cx="61.07" cy="20.37" r="20.37"/>
     <path d="M0 88.666 A40.746 40.746 0 0 1 81.492 88.666 Z"/>
     <path d="M81.492 88.666 A40.746 40.746 0 0 1 0 88.666 Z" fill-opacity="0.55"/>
     <circle cx="20.42" cy="157.05" r="20.37" fill-opacity="0.55"/>
   </g>
-  <!-- Wordmark -->
-  <text x="190" y="132" font-family="ui-monospace, 'Geist Mono', monospace" font-size="50" font-weight="700" fill="#F6F8F9">aka-claude-tools</text>
-  <text x="192" y="178" font-size="24" font-weight="400" fill="#B0C7E2">The clean slate a fresh Claude Code should start from.</text>
-  <!-- Pills -->
-  <g font-size="17" font-weight="600">
-    <g transform="translate(192,210)">
-      <rect width="176" height="40" rx="20" fill="#00E0B8" fill-opacity="0.12" stroke="#00E0B8" stroke-opacity="0.5"/>
-      <text x="88" y="26" text-anchor="middle" fill="#7DF8E2">clean context</text>
-    </g>
-    <g transform="translate(384,210)">
-      <rect width="164" height="40" rx="20" fill="#6AD9FF" fill-opacity="0.12" stroke="#6AD9FF" stroke-opacity="0.5"/>
-      <text x="82" y="26" text-anchor="middle" fill="#A0E7FF">locked doors</text>
-    </g>
-    <g transform="translate(564,210)">
-      <rect width="172" height="40" rx="20" fill="#8A98FF" fill-opacity="0.14" stroke="#8A98FF" stroke-opacity="0.5"/>
-      <text x="86" y="26" text-anchor="middle" fill="#C3CBFF">guarded exits</text>
-    </g>
+  <text x="190" y="140" font-family="ui-monospace, 'Geist Mono', monospace" font-size="50" font-weight="700" fill="#F6F8F9">aka-claude-tools</text>
+  <text x="192" y="186" font-size="25" font-weight="400" fill="#B0C7E2">The clean slate a fresh Claude Code should start from.</text>
+  <g font-family="ui-monospace, 'Geist Mono', monospace" fill="#6B7D8F">
+    <text x="192" y="236" font-size="16"><tspan fill="#7DF8E2">clean context</tspan>  ·  <tspan fill="#A0E7FF">locked doors</tspan>  ·  <tspan fill="#C3CBFF">guarded exits</tspan></text>
+    <text x="192" y="268" font-size="15">MIT  ·  needs jq + bun  ·  side-by-side or in-place</text>
   </g>
-  <text x="192" y="288" font-family="ui-monospace, 'Geist Mono', monospace" font-size="15" fill="#6B7D8F">MIT  ·  needs jq + bun  ·  side-by-side or in-place</text>
+
+  <!-- Signature motif: the agent's actions pass a guard; safe allowed, risky blocked -->
+  <g font-family="ui-monospace, 'Geist Mono', monospace" font-size="14" fill="#6B7D8F">
+    <g stroke-width="2.5" fill="none" opacity="0.55">
+      <path d="M872 170 L967 170" stroke="#00E0B8"/>
+      <path d="M1004 160 L1082 120" stroke="#00E0B8"/>
+      <path d="M1004 182 L1082 222" stroke="#F76F68"/>
+    </g>
+    <circle cx="860" cy="170" r="11" fill="none" stroke="#00E0B8" stroke-width="2.5"/><circle cx="860" cy="170" r="4.5" fill="#00E0B8"/>
+    <text x="860" y="144" text-anchor="middle">agent</text>
+    <rect x="971" y="153" width="34" height="34" rx="8" fill="none" stroke="#00E0B8" stroke-width="2.5"/>
+    <path d="M980 170 l6 6 l12 -13" fill="none" stroke="#00E0B8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="988" y="212" text-anchor="middle" fill="#00E0B8">guard</text>
+    <circle cx="1098" cy="120" r="12" fill="#00E0B8" fill-opacity="0.15" stroke="#00E0B8" stroke-width="2"/>
+    <path d="M1092 120 l4 4 l8 -9" fill="none" stroke="#00E0B8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1128" y="125" fill="#7DF8E2">allowed</text>
+    <circle cx="1098" cy="222" r="12" fill="#F76F68" fill-opacity="0.15" stroke="#F76F68" stroke-width="2"/>
+    <path d="M1093 217 l10 10 M1103 217 l-10 10" stroke="#F76F68" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="1128" y="227" fill="#F76F68">blocked</text>
+  </g>
 </svg>
