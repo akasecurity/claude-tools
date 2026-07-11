@@ -8,16 +8,16 @@ Two install paths share one source of truth (`config/additions.json`): a human r
 
 ## For coding agents
 
-- [agent-install.md](https://github.com/alsoknownassecurity/aka-claude-tools/blob/main/agent-install.md): The deterministic spec to follow when setting up a profile from inside a user's already-authenticated session. Enumerate existing profiles with `./install.sh --enumerate`, migrate cleanly, then drive `./install.sh --apply` and `./install.sh --alias`. `install.sh` is the sole sanctioned shell-rc writer. Don't improvise. Don't write the rc yourself.
-- [agent-uninstall.md](https://github.com/alsoknownassecurity/aka-claude-tools/blob/main/agent-uninstall.md): The counterpart spec for cleanly removing a kit-managed profile.
-- [config/additions.json](https://github.com/alsoknownassecurity/aka-claude-tools/blob/main/config/additions.json): The single source of truth for the addition catalog, defaults, and per-addition build/uninstall logic. Read it; never hardcode an addition into one path only.
+- [agent-install.md](https://github.com/akasecurity/claude-tools/blob/main/agent-install.md): The deterministic spec to follow when setting up a profile from inside a user's already-authenticated session. Enumerate existing profiles with `./install.sh --enumerate`, migrate cleanly, then drive `./install.sh --apply` and `./install.sh --alias`. `install.sh` is the sole sanctioned shell-rc writer. Don't improvise. Don't write the rc yourself.
+- [agent-uninstall.md](https://github.com/akasecurity/claude-tools/blob/main/agent-uninstall.md): The counterpart spec for cleanly removing a kit-managed profile.
+- [config/additions.json](https://github.com/akasecurity/claude-tools/blob/main/config/additions.json): The single source of truth for the addition catalog, defaults, and per-addition build/uninstall logic. Read it; never hardcode an addition into one path only.
 
 ## Documentation
 
-- [README.md](https://github.com/alsoknownassecurity/aka-claude-tools/blob/main/README.md): What it guards against, quick start, the fifteen additions, profiles, and the threat-model boundaries (what the guards do and don't see).
-- [SECURITY.md](https://github.com/alsoknownassecurity/aka-claude-tools/blob/main/SECURITY.md): Private vulnerability reporting.
-- [CONTRIBUTING.md](https://github.com/alsoknownassecurity/aka-claude-tools/blob/main/CONTRIBUTING.md): Branch-and-PR workflow and the sandboxed test suite.
-- [CHANGELOG.md](https://github.com/alsoknownassecurity/aka-claude-tools/blob/main/CHANGELOG.md): Release history.
+- [README.md](https://github.com/akasecurity/claude-tools/blob/main/README.md): What it guards against, quick start, the fifteen additions, profiles, and the threat-model boundaries (what the guards do and don't see).
+- [SECURITY.md](https://github.com/akasecurity/claude-tools/blob/main/SECURITY.md): Private vulnerability reporting.
+- [CONTRIBUTING.md](https://github.com/akasecurity/claude-tools/blob/main/CONTRIBUTING.md): Branch-and-PR workflow and the sandboxed test suite.
+- [CHANGELOG.md](https://github.com/akasecurity/claude-tools/blob/main/CHANGELOG.md): Release history.
 
 ## The additions
 

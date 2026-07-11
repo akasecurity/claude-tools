@@ -15,12 +15,12 @@
 #   aka-graduate.sh --branch fix/foo  <dev-commit>...   # cherry-pick named commits
 #   aka-graduate.sh --branch fix/foo  dev/main~3..dev/main
 #
-# Env: AKA_PUBLIC (public clone, default ~/coding/libs/aka-claude-tools-public)
+# Env: AKA_PUBLIC (public clone, default ~/coding/libs/claude-tools)
 #      AKA_DEV    (dev clone,    default: the repo this script lives in)
 set -euo pipefail
 
 _SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PUBLIC="${AKA_PUBLIC:-$HOME/coding/libs/aka-claude-tools-public}"
+PUBLIC="${AKA_PUBLIC:-$HOME/coding/libs/claude-tools}"
 DEV="${AKA_DEV:-$(git -C "$_SELF_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$HOME/coding/libs/aka-claude-tools")}"
 BRANCH="" ; FORCE=0 ; commits=()
 
@@ -51,7 +51,7 @@ ALLOW_RE='@akasecurity\.io|@akaidentity\.io|noreply@github\.com'
 source "$_SELF_DIR/leak-lib.sh"
 
 cd "$PUBLIC"
-[[ "$(git remote get-url origin)" == *aka-claude-tools.git ]] || die "origin of $PUBLIC is not the public repo"
+[[ "$(git remote get-url origin)" == *claude-tools.git ]] || die "origin of $PUBLIC is not the public repo"
 
 # Wire + fetch the dev remote so its commits are resolvable here.
 git remote get-url dev >/dev/null 2>&1 || git remote add dev "$DEV"
@@ -75,4 +75,4 @@ ok "identity + leak guards clean"
 
 echo; echo "review:  git -C $PUBLIC log --oneline origin/main..HEAD"
 echo "push:    git -C $PUBLIC push -u origin $BRANCH"
-echo "then open a PR:  https://github.com/alsoknownassecurity/aka-claude-tools/compare/main...$BRANCH?expand=1"
+echo "then open a PR:  https://github.com/akasecurity/claude-tools/compare/main...$BRANCH?expand=1"

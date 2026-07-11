@@ -2,19 +2,19 @@
 # touches a matching path. Enforce it with a branch-protection rule on `main`:
 # Settings → Branches → Require a pull request → Require review from Code Owners.
 #
-# SETUP: replace @alsoknownassecurity/maintainers with your real GitHub team
+# SETUP: replace @akasecurity/maintainers with your real GitHub team
 # (Settings → Teams) or a space-separated list of @handles. A PR author cannot
 # satisfy their own code-owner review, so list at least two people / a team.
 
 # Default owner for everything.
-*                       @alsoknownassecurity/maintainers
+*                       @akasecurity/maintainers
 
 # Security-critical surfaces — keep maintainer-gated even if review loosens
 # elsewhere. The hooks ARE the security boundary; install.sh writes user configs.
-/install.sh             @alsoknownassecurity/maintainers
-/config/hooks/          @alsoknownassecurity/maintainers
-/config/settings.base.json        @alsoknownassecurity/maintainers
-/config/managed-permissions.json  @alsoknownassecurity/maintainers
-/shared/lib/            @alsoknownassecurity/maintainers
-/tools/                 @alsoknownassecurity/maintainers
-/.github/               @alsoknownassecurity/maintainers
+/install.sh             @akasecurity/maintainers
+/config/hooks/          @akasecurity/maintainers
+/config/settings.base.json        @akasecurity/maintainers
+/config/managed-permissions.json  @akasecurity/maintainers
+/shared/lib/            @akasecurity/maintainers
+/tools/                 @akasecurity/maintainers
+/.github/               @akasecurity/maintainers

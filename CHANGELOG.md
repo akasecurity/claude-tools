@@ -131,9 +131,9 @@ state before the v0.2.0 public-ready prep.
 Initial internal deployment of the isolated-profile installer, the secure-defaults
 base, and the guard hooks.
 
-[Unreleased]: https://github.com/alsoknownassecurity/aka-claude-tools/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/alsoknownassecurity/aka-claude-tools/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/alsoknownassecurity/aka-claude-tools/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/alsoknownassecurity/aka-claude-tools/compare/v0.1.1...v0.2.0
-[0.1.1]: https://github.com/alsoknownassecurity/aka-claude-tools/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/alsoknownassecurity/aka-claude-tools/releases/tag/v0.1.0
+[Unreleased]: https://github.com/akasecurity/claude-tools/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/akasecurity/claude-tools/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/akasecurity/claude-tools/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/akasecurity/claude-tools/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/akasecurity/claude-tools/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/akasecurity/claude-tools/releases/tag/v0.1.0

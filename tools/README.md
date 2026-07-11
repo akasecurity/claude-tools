@@ -9,7 +9,7 @@ review, and test them.
 
 ```
   ~/.claude-aka            this repo (private dev)         public upstream
-  (live profile)   ──┐     aka-claude-tools-dev      ┌──   aka-claude-tools
+  (live profile)   ──┐     claude-tools-dev          ┌──   claude-tools
   author + test      │     branch + PR + review      │     append-only, all PRs
                      ▼                                ▼
               promote.sh  ───────────────────▶  graduate.sh ───▶ public PR
@@ -36,7 +36,7 @@ review, and test them.
   secrets and operator-specific identifiers before it's published. Run it on the
   public seed right before pushing.
   ```bash
-  tools/audit-history.sh --repo ../aka-claude-tools-public --ref main
+  tools/audit-history.sh --repo ../claude-tools --ref main
   ```
 
 - **`leak-scan-diff.sh`** — PRE-MERGE gate (CI `leak-gate` job on every PR). Scans
@@ -55,7 +55,7 @@ review, and test them.
   workflow runs it **manually** (`workflow_dispatch`) with a scoped GitHub App token,
   keeping a human on the irreversible public push.
   ```bash
-  DRY_RUN=1 PUB_URL=git@github.com:OWNER/aka-claude-tools.git tools/sync-public.sh
+  DRY_RUN=1 PUB_URL=git@github.com:akasecurity/claude-tools.git tools/sync-public.sh
   ```
 
 Both default the repo to the clone they live in and are fully overridable by env

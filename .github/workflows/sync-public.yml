@@ -33,7 +33,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2   # the flow suite's hooks need bun
 
       # Mint a short-lived (~1h) installation token for the public repo. The token is
-      # write-scoped to aka-claude-tools alone and acts as the App's bot identity — not a
+      # write-scoped to akasecurity/claude-tools alone and acts as the App's bot identity — not a
       # person — so the App is the protect-main ruleset's bypass actor. Pinned by commit
       # SHA (v2.2.2), not a floating tag: this step handles the App private key.
       - name: Mint a public-repo App token
@@ -42,8 +42,8 @@ jobs:
         with:
           app-id: ${{ secrets.PUBLIC_SYNC_APP_ID }}
           private-key: ${{ secrets.PUBLIC_SYNC_APP_PRIVATE_KEY }}
-          owner: alsoknownassecurity
-          repositories: aka-claude-tools
+          owner: akasecurity
+          repositories: claude-tools
 
       - name: Gated dev→public sync
         env:
@@ -51,7 +51,7 @@ jobs:
           # (PUB_URL); the dev remote reads with the default token. Two distinct credentials,
           # each in its own remote URL — no shared global header to cross them.
           GH_TOKEN: ${{ github.token }}
-          PUB_URL: https://x-access-token:${{ steps.pubtoken.outputs.token }}@github.com/alsoknownassecurity/aka-claude-tools.git
+          PUB_URL: https://x-access-token:${{ steps.pubtoken.outputs.token }}@github.com/akasecurity/claude-tools.git
           AKA_LEAK_EXTRA: ${{ secrets.AKA_LEAK_EXTRA }}
           RUN_TESTS: "1"
           DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}

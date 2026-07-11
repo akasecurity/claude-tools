@@ -10,7 +10,7 @@ New to this? Hand the repo to Claude and it sets you up. Comfortable in a termin
 Read every hook first. It's all plain shell and TypeScript, MIT, and the guards scan
 locally: nothing is uploaded to run them.
 
-From [alsoknownassecurity](https://github.com/alsoknownassecurity) · MIT · needs `jq` + `bun`.
+From [akasecurity](https://github.com/akasecurity) · MIT · needs `jq` + `bun`.
 
 ---
 
@@ -33,7 +33,7 @@ Two ways in, same result: a hardened profile launched by its own alias.
 
 **Hand it to Claude.** In a logged-in Claude Code session, say:
 
-> Set up aka-claude-tools from github.com/alsoknownassecurity/aka-claude-tools.
+> Set up aka-claude-tools from github.com/akasecurity/claude-tools.
 > Read its agent-install.md and set up a hardened profile for me.
 
 It reads the guide, checks what you already have, migrates it cleanly, and runs the
@@ -42,8 +42,8 @@ installer. Nothing to type.
 **Or run it yourself:**
 
 ```bash
-git clone git@github.com:alsoknownassecurity/aka-claude-tools.git
-cd aka-claude-tools
+git clone git@github.com:akasecurity/claude-tools.git
+cd claude-tools
 ./install.sh             # interactive
 ./install.sh --defaults  # accept the recommended six
 ```

@@ -7,7 +7,7 @@ body:
       value: |
         **Not a security report.** If a guard can be bypassed, data could be
         exfiltrated, or something auto-approves when it shouldn't, do **not** file
-        it here — follow [SECURITY.md](https://github.com/alsoknownassecurity/aka-claude-tools/blob/main/SECURITY.md).
+        it here — follow [SECURITY.md](https://github.com/akasecurity/claude-tools/blob/main/SECURITY.md).
   - type: textarea
     id: what
     attributes:
