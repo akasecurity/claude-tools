@@ -1,8 +1,8 @@
 class AkaClaudeTools < Formula
   desc "Security defaults for Claude Code — clean context, locked-down credentials, guarded egress"
-  homepage "https://github.com/akasecurity/claude-tools"
-  url "https://github.com/akasecurity/claude-tools/releases/download/v0.4.0/aka-claude-tools-0.4.0.tar.gz"
-  sha256 "PLACEHOLDER_SHA256_UPDATE_ON_RELEASE"
+  homepage "https://akasecurity.io"
+  url "https://github.com/akasecurity/claude-tools/archive/refs/tags/v0.4.0.tar.gz"
+  sha256 "15b3e91e46a8bdb20bbdfff57f8bcf8226191abdad6e599fe48292ed5f571685"
   license "MIT"
   version "0.4.0"
 
