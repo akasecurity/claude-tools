@@ -1591,6 +1591,16 @@ apply_additions() {
     add="$(jq --arg cmd "$cqd/hooks/harness-pointer.sh" \
       '.hooks.PreToolUse += [{matcher:"Bash",hooks:[{type:"command",command:$cmd}]}]' <<<"$add")"
   fi
+  if is_selected notify-osc "$_sel_ids"; then
+    # Pure-shell hook (like harness-pointer): registered with the bare $cqd path, no bun.
+    # Bound to Stop (turn-end) and Notification (idle/permission prompts only, via the
+    # matcher; never SubagentStop). The generic prune path (prune_hook_regs, keyed
+    # on the command basename across all .hooks events) deregisters both on deselect.
+    place_file "$CONFIG_SRC/hooks/notify-osc.sh" "$config_dir/hooks" +x
+    add="$(jq --arg cmd "$cqd/hooks/notify-osc.sh" \
+      '.hooks.Stop += [{hooks:[{type:"command",command:$cmd}]}]
+       | .hooks.Notification += [{matcher:"idle_prompt|permission_prompt",hooks:[{type:"command",command:$cmd}]}]' <<<"$add")"
+  fi
   if is_selected command-guard "$_sel_ids"; then
     # bun is guaranteed present here — the hard-dependency gate above aborts the
     # install if command-guard is selected without bun (no soft-skip: a default-on

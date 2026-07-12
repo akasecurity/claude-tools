@@ -116,6 +116,15 @@
       "usesConfig": true
     },
     {
+      "id": "notify-osc",
+      "name": "notify-osc",
+      "prompt": "notify-osc: desktop notification when it's genuinely your turn (quiet while a background task runs)?",
+      "recommended": false,
+      "description": "Stop/Notification hook that fires a native desktop notification via a terminal escape sequence, auto-detecting the dialect per terminal (OSC 99 kitty; OSC 777 Ghostty/WezTerm/urxvt/rio/foot; OSC 9 iTerm2 + universal fallback) and emitting exactly one — Ghostty and WezTerm honor several, so 'emit all' would double-fire. Unlike Claude Code's built-in notifier, it stays SILENT when you end a turn parked on a running background task (subagent or shell), so a banner means Claude genuinely needs you — closing the gap the rejected BackgroundTasksIdle request (anthropics/claude-code#45781) left open, via the background_tasks array Claude Code added to the Stop payload (2.1.145). Rides Claude Code's terminalSequence output, so it works over SSH and inside tmux/screen. Convenience, not a security boundary. Override detection with CLAUDE_NOTIFY_OSC=777|99|9|off.",
+      "hook": "hooks/notify-osc.sh",
+      "event": "Stop"
+    },
+    {
       "id": "shell-audit",
       "name": "shell-audit",
       "prompt": "shell-audit (shell startup audit: aliases, secrets, persistence, git drift)?",

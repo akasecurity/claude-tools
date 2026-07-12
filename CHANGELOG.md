@@ -24,6 +24,15 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   offers an alternate (default `<name>2`). It now checks that alternate against aliases already defined in your
   shell rc and the files it sources, not only against commands on `PATH`, and writes no alias instead of shadowing
   yours.
+### Added
+- `notify-osc` opt-in addition: a Stop/Notification hook that fires a native desktop
+  notification only when it's genuinely your turn — it stays silent when a turn ends while a
+  background task (subagent or shell) is still running, reading the `background_tasks` array
+  Claude Code added to the Stop payload (2.1.145). Auto-detects the terminal and emits exactly
+  one OSC dialect (OSC 99 kitty, OSC 777 Ghostty/WezTerm/urxvt/rio/foot, OSC 9 iTerm2 +
+  fallback) through the `terminalSequence` hook output, so it works over SSH and inside
+  tmux/screen. Pure shell (no bun). Override detection with `CLAUDE_NOTIFY_OSC=777|99|9|off`.
+  Deselecting it removes the hook and both registrations.
 
 ## [0.5.0] guard-core, audit log, MCP gating and the aka-claude launcher shim
 
