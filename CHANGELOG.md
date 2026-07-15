@@ -8,6 +8,8 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+## [0.4.1] plugin distribution + a dead permission-rule fix
+
 ### Added
 - `claude-tools` Claude Code **plugin** form: the guard hooks (command-guard, leak-guard)
   installable via `claude plugin install` into your active profile. Generated from
@@ -15,6 +17,13 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   notice when bun is missing. `rtk-safe` (like `secure-settings` and the status line) stays
   installer-only — it needs a `permissions.allow` settings merge a plugin manifest can't apply.
   The isolated-profile installer is unchanged.
+
+### Fixed
+- `secure-settings` no longer ships the six `Write(~/.bash_profile)`-style deny rules.
+  Claude Code's startup permission-check validation now rejects them: `Edit(path)` rules
+  already cover every file-editing tool (including Write), so the separate `Write(...)`
+  entries were always redundant and now surface as a startup error for anyone with
+  `secure-settings` installed. The `Edit(...)` rules for the same paths are unchanged.
 
 ## [0.4.0] telemetry opt-in toggles and a lighter research workflow
 

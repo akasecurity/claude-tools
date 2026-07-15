@@ -1,6 +1,6 @@
 {
   "name": "@akasecurity/claude-tools",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publishConfig": { "access": "public" },
   "description": "Security defaults for Claude Code — clean context, locked-down credentials, guarded egress.",
   "keywords": ["claude", "claude-code", "security", "ai-safety", "mcp", "hooks"],
