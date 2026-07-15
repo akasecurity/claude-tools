@@ -3,7 +3,7 @@
     "Maintainer notes, stripped from the merged settings.json by install.sh, never shipped to a user's config.",
     "Credential-read denies are conventional security defaults. They were cross-referenced against trailofbits/claude-code-config.",
     "Nonessential-traffic env opt-outs (DISABLE_TELEMETRY et al.) live in the opt-in `telemetry-off` addition, not here, so Remote Control works by default.",
-    "Shell-rc Edit/Write denies block the Edit/Write TOOLS (the visible, approvable path) and stop Claude from managing your dotfiles (hand those off via `! <cmd>`). Bash-redirection writes (`echo ... >> ~/.zshrc`) are covered by command-guard.ts, which explicitly denies that vector. The two layers together close the path. Kept as a cheap defense against a persistence vector. Drop them if you want Claude editing your rc files."
+    "Shell-rc Edit denies block the Edit-family TOOLS (the visible, approvable path — Edit(path) rules cover every file-editing tool, including Write, so a separate Write(path) rule is redundant and Claude Code's own startup validation now rejects it as dead) and stop Claude from managing your dotfiles (hand those off via `! <cmd>`). Bash-redirection writes (`echo ... >> ~/.zshrc`) are covered by command-guard.ts, which explicitly denies that vector. The two layers together close the path. Kept as a cheap defense against a persistence vector. Drop them if you want Claude editing your rc files."
   ],
   "attribution": {
     "commit": "",
@@ -43,13 +43,7 @@
       "Read(~/Library/Application Support/Electrum/**)",
       "Read(~/Library/Application Support/Exodus/**)",
       "Read(~/Library/Ethereum/**)",
-      "Read(~/Library/Keychains/**)",
-      "Write(~/.bash_profile)",
-      "Write(~/.bashrc)",
-      "Write(~/.profile)",
-      "Write(~/.zprofile)",
-      "Write(~/.zshenv)",
-      "Write(~/.zshrc)"
+      "Read(~/Library/Keychains/**)"
     ]
   }
 }
