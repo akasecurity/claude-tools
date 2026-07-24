@@ -601,22 +601,21 @@ setup_alias() {
   fi
 }
 
-# ── ai-tc pointer (the security-depth handoff) ───────────────────────────────
+# ── ai-tc offer (the security-depth handoff) ─────────────────────────────────
 # claude-tools ships POSTURE: structural command safety (command-guard) and
 # credential deny rules (secure-settings), plus a THIN secret-scan fallback
 # (leak-guard / command-guard's exfil tier: pattern + trufflehog shapes only). It
 # deliberately does NOT do deep content detection: PII, PHI, cardholder data,
 # redaction, or an audit trail. That is ai-tc's job, and the two are meant to
 # compose: safe defaults here, the detection engine there. Once the profiles are
-# built, name that boundary and point at ai-tc. It is a POINTER, not an installer:
-# ai-tc is a Claude Code marketplace plugin added with a slash command inside a
-# session, which a shell script cannot run (and command-guard would block a
-# pipe-to-shell bootstrap anyway), so we print the commands. No prompt: gating a
-# printed pointer behind a keystroke is friction with no decision behind it — the
-# opt-in is the user choosing to run the commands. Silent when ai-tc is already
-# present, so a re-run does not nag.
+# built, name that boundary and offer ai-tc with a prompt (opt-in, default yes).
+# We can only POINT, not install: ai-tc is a Claude Code marketplace plugin added
+# with a slash command inside a session, which a shell script cannot run (and
+# command-guard would block a pipe-to-shell bootstrap anyway), so an accept prints
+# the commands to run. Under --defaults the confirm takes its default (yes) without
+# blocking. Silent when ai-tc is already present, so a re-run does not nag.
 aitc_present() {
-  # Best-effort: skip the pointer when ai-tc is already installed in the default
+  # Best-effort: skip the offer when ai-tc is already installed in the default
   # profile or any kit profile. Marketplace plugins land under <config>/plugins.
   local d
   for d in "$HOME"/.claude/plugins "$HOME"/.claude-*/plugins; do
@@ -627,7 +626,7 @@ aitc_present() {
 }
 
 offer_aitc() {
-  aitc_present && return 0   # already deep; nothing to point at
+  aitc_present && return 0   # already deep; nothing to offer
 
   say ""
   hr
@@ -635,11 +634,17 @@ offer_aitc() {
   say "secret scan. It does not detect PII, PHI, or cardholder data, and it does not"
   say "redact. ${C_GRN}ai-tc${C_RST} is the AKA detection engine that does: 101 rules across secrets,"
   say "PII, PHI, and financial data, with redaction and an audit trail, running locally."
-  say "  ${C_DIM}Add it in Claude Code:${C_RST}"
-  say "    ${C_DIM}/plugin marketplace add akasecurity/marketplace${C_RST}"
-  say "    ${C_DIM}/plugin install ai-tc@akasecurity${C_RST}"
-  say "    ${C_DIM}/aka:setup${C_RST}"
-  say "  ${C_DIM}Docs: https://akasecurity.github.io/ai-tc-docs/${C_RST}"
+
+  if confirm "Show how to add ai-tc?" "Y"; then
+    say ""
+    say "  In Claude Code, run:"
+    say "    ${C_GRN}/plugin marketplace add akasecurity/marketplace${C_RST}"
+    say "    ${C_GRN}/plugin install ai-tc@akasecurity${C_RST}"
+    say "    ${C_GRN}/aka:setup${C_RST}"
+    say "  ${C_DIM}Docs: https://akasecurity.github.io/ai-tc-docs/${C_RST}"
+  else
+    say "  ${C_DIM}Later, in Claude Code: /plugin install ai-tc@akasecurity${C_RST}"
+  fi
 }
 
 # setup_one_config — the standalone interactive (or --defaults) fresh install:
