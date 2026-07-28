@@ -2,13 +2,18 @@
 # aka-claude-tools installer
 # ──────────────────────
 # Creates an ISOLATED Claude Code config folder, layers on the aka-claude-tools
-# additions you select, and wires a shell alias so you can launch it by name.
+# additions you select, and wires a launcher so you can start it by name.
 #
 # Mechanism: Claude Code reads its config dir from $CLAUDE_CONFIG_DIR. Each folder
-# is fully independent (own settings, hooks, agents, sessions). The alias just
-# exports that variable before launching `claude`:
+# is fully independent (own settings, hooks, agents, sessions). The launcher is a
+# shell alias that exports that variable before launching `claude`:
 #
-#     alias aka='CLAUDE_CONFIG_DIR="$HOME/.claude-aka" claude'
+#     alias aka-claude='CLAUDE_CONFIG_DIR="$HOME/.claude-aka" claude'
+#
+# plus a PATH-visible executable shim at <config_dir>/bin/<name> (the managed rc
+# block also prepends that bin dir to PATH), so non-interactive shells, scripts,
+# and the ai-tc `aka` CLI's git-style subcommand dispatch (`aka claude` execs
+# `aka-claude` from PATH) can launch the profile too.
 #
 # Re-run any time. Idempotent: re-running for the same folder LAYERS in place —
 # it never duplicates, and unchecking an addition you previously installed
@@ -32,7 +37,8 @@
 #
 # Flags:
 #   --defaults         non-interactive; accept every default (config ~/.claude-aka,
-#                      alias `aka`, recommended additions, no copy of existing config).
+#                      launcher `aka-claude`, recommended additions, no copy of
+#                      existing config).
 #   --no-auth-inherit  do NOT seed the new profile's .claude.json from your existing
 #                      login (use when the profile is for a DIFFERENT account).
 #   --apply            DETERMINISTIC ENGINE mode: layer the additions named in
@@ -538,6 +544,62 @@ seed_auth() {
   fi
 }
 
+# ── launcher shim (the PATH-visible twin of the alias) ────────────────────────
+# The alias only exists in interactive shells that source the rc. The shim at
+# <config_dir>/bin/<name> is a real executable, so scripts, other shells, and the
+# ai-tc `aka` CLI's git-style subcommand dispatch (`aka claude` execs `aka-claude`
+# from PATH) can launch the profile too. The managed rc block prepends that bin
+# dir to PATH (guarded, so re-sourcing never duplicates the entry). The marker
+# comment below identifies kit-written shims so cleanup NEVER deletes a user file
+# that merely shares the name.
+AKA_SHIM_MARKER='# aka-claude-tools launcher shim — managed by install.sh; safe to delete with the profile.'
+
+# write_launcher_shim <config_dir> <name> — (re)write the executable shim and
+# sweep stale same-profile shims left by a prior launcher name (marker-gated:
+# only files carrying AKA_SHIM_MARKER are ever removed). config_dir has already
+# passed assert_safe_config_dir (no quotes/backslashes/$), so embedding it in
+# double quotes is safe — the same reasoning as the alias body.
+write_launcher_shim() {
+  local config_dir="$1" name="$2" shim old
+  mkdir -p "$config_dir/bin"
+  for old in "$config_dir/bin"/*; do
+    [ -f "$old" ] || continue
+    [ "$(basename "$old")" = "$name" ] && continue
+    grep -qF "$AKA_SHIM_MARKER" "$old" 2>/dev/null && rm -f "$old"
+  done
+  shim="$config_dir/bin/$name"
+  printf '#!/usr/bin/env bash\n%s\nCLAUDE_CONFIG_DIR="%s" exec claude "$@"\n' \
+    "$AKA_SHIM_MARKER" "$config_dir" > "$shim"
+  chmod +x "$shim"
+}
+
+# launcher_block_content <config_dir> <name> — the managed rc block body: the
+# alias line (uninstall.sh + --enumerate key off its literal CLAUDE_CONFIG_DIR="…")
+# plus a guarded PATH export for the shim dir. $PATH is emitted LITERALLY (the rc
+# expands it at source time), which is why this builds the text with printf
+# formats rather than interpolating in this shell.
+launcher_block_content() {
+  local config_dir="$1" name="$2"
+  printf "alias %s='CLAUDE_CONFIG_DIR=\"%s\" claude'\n" "$name" "$config_dir"
+  printf 'case ":$PATH:" in *":%s/bin:"*) ;; *) export PATH="%s/bin:$PATH" ;; esac' \
+    "$config_dir" "$config_dir"
+}
+
+# launcher_path_conflict <config_dir> <name> — if <name> already resolves to a
+# command in the installer's own environment (a PATH executable, builtin, or
+# exported function — rc-file aliases are alias_target_elsewhere's job), print
+# the resolution and return 0. The profile's OWN shim is not a conflict (that's
+# just a re-run). Claiming a name that is already a command would shadow it in
+# every shell the managed block reaches — refuse/warn instead.
+launcher_path_conflict() {
+  local config_dir="$1" name="$2" resolved
+  resolved="$(command -v -- "$name" 2>/dev/null || true)"
+  [ -z "$resolved" ] && return 1
+  [ "$resolved" = "$config_dir/bin/$name" ] && return 1
+  printf '%s\n' "$resolved"
+  return 0
+}
+
 # ── alias management (the SOLE sanctioned shell-rc writer) ────────────────────
 # setup_alias <config_dir> <alias_name> [policy: interactive|strict]
 # Reviews the rc + every file it sources (alias_target_elsewhere, cycle-safe) and
@@ -549,6 +611,42 @@ seed_auth() {
 # already used for a DIFFERENT target):
 #   • interactive → offer an alternate name (default <alias>2), or skip;
 #   • strict      → report and return 1 so the caller (the agent) picks another.
+# The same policy applies when the name is already a COMMAND on PATH
+# (launcher_path_conflict) — the rc scan can't see those. Every successful write
+# goes through _write_launcher: managed block (alias + guarded PATH export) +
+# the PATH shim + the meta record.
+
+# _write_launcher <rc> <config_dir> <name> — the one write path: managed rc block
+# (alias + guarded PATH export), the PATH shim, and the meta record. Idempotent.
+_write_launcher() {
+  local rc="$1" config_dir="$2" name="$3"
+  write_managed_block "$rc" "$name" "$(launcher_block_content "$config_dir" "$name")"
+  write_launcher_shim "$config_dir" "$name"
+  meta_set "$config_dir" alias "$name"
+  ok "Aliased ${C_BOLD}${name}${C_RST} → $config_dir  ${C_DIM}(alias + PATH shim, in $rc)${C_RST}"
+  say "  ${C_DIM}Open a new shell (or: source $rc), then run:${C_RST}  ${C_BOLD}${name}${C_RST}"
+}
+
+# _launcher_alternate_prompt <rc> <config_dir> <taken_name> — interactive-policy
+# fallback when <taken_name> is unavailable (rc-alias collision or PATH command):
+# offer an alternate (default <name>2), re-gate it, and refuse to claim an
+# alternate that is ALSO a command on PATH (bounded — no re-prompt loop).
+_launcher_alternate_prompt() {
+  local rc="$1" config_dir="$2" taken="$3" newalias="" clash
+  prompt newalias "  Use a different alias (blank = skip the alias entirely):" "${taken}2"
+  if [ -n "$newalias" ]; then
+    assert_safe_alias_name "$newalias"   # the prompted name is user input → re-gate it
+    if clash="$(launcher_path_conflict "$config_dir" "$newalias")"; then
+      warn "'${newalias}' is also a command on your PATH (${clash}) — not claiming it."
+      say "  ${C_DIM}No alias written. Pick a free name and re-run, or launch with:${C_RST}  CLAUDE_CONFIG_DIR=\"${config_dir}\" claude"
+      return 0
+    fi
+    _write_launcher "$rc" "$config_dir" "$newalias"
+  else
+    say "  ${C_DIM}No alias written. Launch this profile with:${C_RST}  CLAUDE_CONFIG_DIR=\"${config_dir}\" claude"
+  fi
+}
+
 setup_alias() {
   local config_dir="$1" alias_name="$2" policy="${3:-interactive}"
   # Fail closed BEFORE touching the rc (assert_safe_* live in common.sh).
@@ -559,6 +657,10 @@ setup_alias() {
   if [ "$prior" = "$config_dir" ]; then
     # Already resolves to THIS profile from elsewhere (e.g. a fleet aliases file) →
     # ensure a SINGLE definition: drop any stale managed block of ours, else it's a dup.
+    # Still (re)write the shim so an idempotent re-run repairs a deleted one; the
+    # PATH line may be absent here (the user hand-manages their own rc definition),
+    # which is acceptable — the shim still works by absolute path.
+    write_launcher_shim "$config_dir" "$alias_name"
     if remove_managed_block "$rc" "$alias_name"; then
       ok "Alias ${C_BOLD}${alias_name}${C_RST} already resolves to this profile via your shell config — removed our now-redundant block."
     else
@@ -578,27 +680,27 @@ setup_alias() {
       say "  ${C_DIM}Pick another alias and re-run, or launch with:${C_RST}  CLAUDE_CONFIG_DIR=\"${config_dir}\" claude"
       return 1
     fi
-    local newalias=""
-    prompt newalias "  Use a different alias (blank = skip the alias entirely):" "${alias_name}2"
-    if [ -n "$newalias" ]; then
-      assert_safe_alias_name "$newalias"   # the prompted name is user input → re-gate it
-      write_managed_block "$rc" "$newalias" \
-"alias ${newalias}='CLAUDE_CONFIG_DIR=\"${config_dir}\" claude'"
-      meta_set "$config_dir" alias "$newalias"
-      ok "Aliased ${C_BOLD}${newalias}${C_RST} → $config_dir  ${C_DIM}(in $rc)${C_RST}"
-      say "  ${C_DIM}Open a new shell (or: source $rc), then run:${C_RST}  ${C_BOLD}${newalias}${C_RST}"
-    else
-      say "  ${C_DIM}No alias written. Launch this profile with:${C_RST}  CLAUDE_CONFIG_DIR=\"${config_dir}\" claude"
-    fi
-    return 0
-  else
-    write_managed_block "$rc" "$alias_name" \
-"alias ${alias_name}='CLAUDE_CONFIG_DIR=\"${config_dir}\" claude'"
-    meta_set "$config_dir" alias "$alias_name"
-    ok "Aliased ${C_BOLD}${alias_name}${C_RST} → $config_dir  ${C_DIM}(in $rc)${C_RST}"
-    say "  ${C_DIM}Open a new shell (or: source $rc), then run:${C_RST}  ${C_BOLD}${alias_name}${C_RST}"
+    _launcher_alternate_prompt "$rc" "$config_dir" "$alias_name"
     return 0
   fi
+  # No rc-alias collision — but the name may be a COMMAND on PATH (the rc scan
+  # can't see those). Claiming it would shadow that command via both the alias
+  # and the PATH shim, so refuse (strict) / offer an alternate (interactive).
+  local clash
+  if clash="$(launcher_path_conflict "$config_dir" "$alias_name")"; then
+    warn "'${alias_name}' is already a command on your PATH (${clash})."
+    if [ "$alias_name" = "aka" ]; then
+      say "  ${C_DIM}'aka' is the AI Traffic Control CLI. Keep the default 'aka-claude' launcher name instead — once ai-tc is installed, 'aka claude' dispatches to it and launches this profile.${C_RST}"
+    fi
+    if [ "$policy" = "strict" ]; then
+      say "  ${C_DIM}Pick another launcher name and re-run, or launch with:${C_RST}  CLAUDE_CONFIG_DIR=\"${config_dir}\" claude"
+      return 1
+    fi
+    _launcher_alternate_prompt "$rc" "$config_dir" "$alias_name"
+    return 0
+  fi
+  _write_launcher "$rc" "$config_dir" "$alias_name"
+  return 0
 }
 
 # setup_one_config — the standalone interactive (or --defaults) fresh install:
@@ -635,13 +737,18 @@ setup_one_config() {
     fi
   fi
 
-  # 2. alias name (default derived from folder basename: ~/.claude-aka -> aka).
+  # 2. alias name (default derived from folder basename: ~/.claude-work -> work).
   local alias_name=""
   if [ "$is_default" != "1" ]; then
     local base alias_default
     base="$(basename "$config_dir")"
     alias_default="${base#.claude-}"; [ "$alias_default" = "$base" ] && alias_default="aka"
     [ -z "$alias_default" ] && alias_default="aka"
+    # Bare `aka` is reserved for the ai-tc AI Traffic Control CLI: its git-style
+    # dispatcher runs `aka claude` by exec'ing `aka-claude` from PATH — exactly
+    # this launcher's shim. So ~/.claude-aka (and the fallback) default to
+    # `aka-claude`, never plain `aka`.
+    [ "$alias_default" = "aka" ] && alias_default="aka-claude"
     prompt alias_name "Shell alias to launch it:" "$alias_default"
   fi
 
@@ -1286,23 +1393,26 @@ delete_alias_entry() {
   begin="# >>> aka-claude-tools managed: ${CT_ALIAS} >>>"
   end="# <<< aka-claude-tools managed: ${CT_ALIAS} <<<"
 
-  # Optional profile guard: if CT_CONFIG_DIR is set, read the managed block's actual
-  # alias target and refuse if it points to a DIFFERENT profile. We read the managed
-  # block directly (not alias_target_elsewhere, which strips our block to find
+  # Extract the alias line from inside our managed block (awk range pattern is safe:
+  # begin/end are literal strings from marker constants, not user-controlled). The
+  # resolved target drives BOTH the profile guard below and the shim cleanup after
+  # deletion (the shim lives at <target>/bin/<alias>).
+  local mb_line mb_target="" config_dir=""
+  if [ -f "$rc" ]; then
+    mb_line="$(awk -v b="$begin" -v e="$end" '$0==b{in_b=1;next} $0==e{in_b=0;next} in_b{print}' "$rc" \
+               | grep -m1 "^alias[[:space:]]*${CT_ALIAS}=" || true)"
+    [ -n "$mb_line" ] && mb_target="$(_alias_resolve_target "$mb_line")"
+  fi
+
+  # Optional profile guard: if CT_CONFIG_DIR is set, refuse if the managed block's
+  # actual alias target points to a DIFFERENT profile. We read the managed block
+  # directly (not alias_target_elsewhere, which strips our block to find
   # OTHER-scope definitions) so the check covers aliases that only live in our block.
   if [ -n "${CT_CONFIG_DIR:-}" ]; then
-    local config_dir="${CT_CONFIG_DIR/#\~/$HOME}"
+    config_dir="${CT_CONFIG_DIR/#\~/$HOME}"
     [ "$config_dir" != "/" ] && config_dir="${config_dir%/}"
     case "$config_dir" in /*) ;; *) config_dir="$PWD/$config_dir" ;; esac
     assert_safe_config_dir "$config_dir"
-    # Extract the alias line from inside our managed block (awk range pattern is safe:
-    # begin/end are literal strings from marker constants, not user-controlled).
-    local mb_line mb_target=""
-    if [ -f "$rc" ]; then
-      mb_line="$(awk -v b="$begin" -v e="$end" '$0==b{in_b=1;next} $0==e{in_b=0;next} in_b{print}' "$rc" \
-                 | grep -m1 "^alias[[:space:]]*${CT_ALIAS}=" || true)"
-      [ -n "$mb_line" ] && mb_target="$(_alias_resolve_target "$mb_line")"
-    fi
     # Fail closed: if the block exists but can't be parsed (no alias line), refuse rather
     # than proceeding blindly — an unparsable block may belong to another profile (issue #116).
     if [ -z "$mb_target" ] && [ -f "$rc" ] && grep -qF "$begin" "$rc"; then
@@ -1328,6 +1438,18 @@ delete_alias_entry() {
     mv "$tmp" "$rc"
     [ -n "${CT_CONFIG_DIR:-}" ] && meta_set "$config_dir" alias "" || true
     ok "Removed alias '${CT_ALIAS}' from ${rc}"
+    # Also remove the launcher's PATH shim — but ONLY a file carrying the kit's
+    # shim marker (never an arbitrary user file that shares the name). The shim
+    # dir comes from CT_CONFIG_DIR when given, else from the deleted block's own
+    # resolved target.
+    local shim_dir="$config_dir"
+    [ -z "$shim_dir" ] && [ -n "$mb_target" ] && [ "$mb_target" != "OTHER" ] && shim_dir="$mb_target"
+    if [ -n "$shim_dir" ] && [ -f "$shim_dir/bin/$CT_ALIAS" ] \
+       && grep -qF "$AKA_SHIM_MARKER" "$shim_dir/bin/$CT_ALIAS" 2>/dev/null; then
+      rm -f "$shim_dir/bin/$CT_ALIAS"
+      rmdir "$shim_dir/bin" 2>/dev/null || true
+      ok "Removed launcher shim ${shim_dir}/bin/${CT_ALIAS}"
+    fi
     say "  ${C_DIM}Open a new shell (or: source ${rc}) for the change to take effect.${C_RST}"
   else
     warn "No aka-claude-tools-managed alias block found for '${CT_ALIAS}' in ${rc}."
