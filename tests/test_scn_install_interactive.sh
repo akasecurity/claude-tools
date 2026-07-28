@@ -86,6 +86,7 @@ $ADDITION_MATCHERS
     if {\$pass == 1} { set pass 2; send "y\r" } else { send "n\r" }
     exp_continue
   }
+  -re {Show how to add ai-tc}           { send "y\r"; exp_continue }
   -re {Pin a location}                  { send "\r"; exp_continue }
   timeout { puts "EXPECT_TIMEOUT"; exit 2 }
   eof
@@ -101,6 +102,10 @@ rc=$?
 assert_eq   "interactive install exits 0" "0" "$rc"
 assert_ngrep "no expect timeout (menu never hung)" "EXPECT_TIMEOUT" "$LOG"
 assert_grep "install reported done" 'Done|ready' "$LOG"
+# ai-tc offer fires (no ai-tc in the sandbox HOME) and, on accept, prints the
+# marketplace install command — the security-depth handoff to the detection engine.
+assert_grep "ai-tc offer shown" 'Show how to add ai-tc' "$LOG"
+assert_grep "ai-tc install command printed on accept" 'plugin install ai-tc@akasecurity' "$LOG"
 
 # ── profile 1: selection honored ──────────────────────────────────────────────
 assert_file "profile 1 dir created" "$P1"

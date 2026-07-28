@@ -32,6 +32,8 @@ adds the guardrails for the obvious foot-guns:
 
 Fifteen small pieces, nine on by default and six opt-in. Each stands alone. Take what you want.
 
+**claude-tools is safe defaults for the harness; [ai-tc](https://github.com/akasecurity/ai-tc) is the detection engine.** The secret scan here is a shallow fallback — pattern and key-shape matching on egress. It does not detect PII, PHI, or cardholder data, and it does not redact. When you need deep content detection with an audit trail, add ai-tc; the installer offers it. The two compose: posture from claude-tools, detection from ai-tc.
+
 ## Quick start
 
 Two ways in, same result: a hardened profile launched by its own alias.
