@@ -564,13 +564,16 @@ AKA_SHIM_MARKER='# aka-claude-tools launcher shim — managed by install.sh; saf
 # A shim left behind by a previous launcher name is NOT swept: its managed rc
 # block survives a rename too, so removing one without the other would leave the
 # old name half-working. --delete-alias and uninstall.sh remove both together.
+# Each step reports what failed: this runs BEFORE the rc is touched, so dying
+# here leaves the user's shell config untouched rather than half-configured.
 write_launcher_shim() {
   local config_dir="$1" name="$2" shim
-  mkdir -p "$config_dir/bin"
+  mkdir -p "$config_dir/bin" || die "Cannot create ${config_dir}/bin — your shell rc was NOT modified."
   shim="$config_dir/bin/$name"
   printf '#!/usr/bin/env bash\n%s\nCLAUDE_CONFIG_DIR="%s" exec claude "$@"\n' \
-    "$AKA_SHIM_MARKER" "$config_dir" > "$shim"
-  chmod +x "$shim"
+    "$AKA_SHIM_MARKER" "$config_dir" > "$shim" \
+    || die "Cannot write the launcher shim at ${shim} — your shell rc was NOT modified."
+  chmod +x "$shim" || die "Cannot make ${shim} executable — your shell rc was NOT modified."
 }
 
 # launcher_path_representable <config_dir> — PATH is colon-delimited, so a config
@@ -630,8 +633,10 @@ launcher_path_conflict() {
 # (alias + guarded PATH export), the PATH shim, and the meta record. Idempotent.
 _write_launcher() {
   local rc="$1" config_dir="$2" name="$3"
-  write_managed_block "$rc" "$name" "$(launcher_block_content "$config_dir" "$name")"
+  # Shim first: it can fail on a read-only or full disk, and a failure there must
+  # not leave an alias block pointing at a launcher that was never created.
   write_launcher_shim "$config_dir" "$name"
+  write_managed_block "$rc" "$name" "$(launcher_block_content "$config_dir" "$name")"
   meta_set "$config_dir" alias "$name"
   ok "Aliased ${C_BOLD}${name}${C_RST} → $config_dir  ${C_DIM}(alias + PATH shim, in $rc)${C_RST}"
   if ! launcher_path_representable "$config_dir"; then
@@ -1458,11 +1463,16 @@ delete_alias_entry() {
     # resolved target.
     local shim_dir="$config_dir"
     [ -z "$shim_dir" ] && [ -n "$mb_target" ] && [ "$mb_target" != "OTHER" ] && shim_dir="$mb_target"
-    if [ -n "$shim_dir" ] && [ -f "$shim_dir/bin/$CT_ALIAS" ] \
-       && grep -qF "$AKA_SHIM_MARKER" "$shim_dir/bin/$CT_ALIAS" 2>/dev/null; then
-      rm -f "$shim_dir/bin/$CT_ALIAS"
-      rmdir "$shim_dir/bin" 2>/dev/null || true
-      ok "Removed launcher shim ${shim_dir}/bin/${CT_ALIAS}"
+    # An unreadable file is NOT the same as a non-kit file: say so rather than
+    # leaving the shim behind under a message that reads like a full cleanup.
+    if [ -n "$shim_dir" ] && [ -f "$shim_dir/bin/$CT_ALIAS" ]; then
+      if [ ! -r "$shim_dir/bin/$CT_ALIAS" ]; then
+        warn "Couldn't read ${shim_dir}/bin/${CT_ALIAS} to check whether it's ours — left in place. Remove it by hand if it's a stale launcher shim."
+      elif grep -qF "$AKA_SHIM_MARKER" "$shim_dir/bin/$CT_ALIAS"; then
+        rm -f "$shim_dir/bin/$CT_ALIAS"
+        rmdir "$shim_dir/bin" 2>/dev/null || true
+        ok "Removed launcher shim ${shim_dir}/bin/${CT_ALIAS}"
+      fi
     fi
     say "  ${C_DIM}Open a new shell (or: source ${rc}) for the change to take effect.${C_RST}"
   else

@@ -298,7 +298,9 @@ the user's go-ahead.
   once with a sample tool-call JSON and confirm sensible exit codes.
 - The alias is present in the rc; `.claude.json` has `oauthAccount`.
 - The launcher shim exists and is executable at `<cfg>/bin/<name>`, and the
-  managed rc block carries the guarded `PATH` export for `<cfg>/bin`.
+  managed rc block carries the guarded `PATH` export for `<cfg>/bin` — unless the
+  profile path contains a `:`, which cannot be expressed as a `PATH` entry; the
+  installer then writes the alias and shim only, and says so.
 - Summarize what was migrated, what was added, the auth outcome, and any
   edge cases you handled or flagged. Tell the user to open a new shell and run
   the alias.

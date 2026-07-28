@@ -22,7 +22,10 @@
 #      the same name that lacks the shim marker.
 #   G. Default-name derivation: a full --defaults install into ~/.claude-aka
 #      claims `aka-claude`, NOT bare `aka` (reserved for the ai-tc CLI).
-#   H. A rename sweeps the profile's STALE marker-carrying shim; the new one lands.
+#   H. A second launcher name lands its own shim and leaves the first one's shim
+#      intact — the first name's rc block survives a rename, so its shim must too.
+#   I. A profile path containing ':' gets the alias and the shim but NO PATH entry
+#      (a colon would split into a relative PATH entry), and the skip is reported.
 #
 # Fully sandboxed: fake $HOME, fake rc, hermetic PATH (install_path — so a real
 # `aka`/`aka-claude` on the operator's machine can't flake the suite). SHELL is
@@ -172,5 +175,32 @@ assert_grep  "I: the skip is reported to the user" "contains ':'" "$SBI/log"
 # Sourcing the rc must not introduce a relative PATH entry.
 REL="$(bash -c "export PATH=/usr/bin:/bin; source '$RCI'; printf '%s' \"\$PATH\"" | tr ':' '\n' | grep -vc '^/' || true)"
 assert_eq "I: no relative PATH entries after sourcing" "0" "$REL"
+
+# ── J. a shim that can't be written leaves the shell rc untouched ─────────────
+# The shim is written before the rc block precisely so this ordering holds: a
+# half-configured launcher (alias present, nothing to launch) is worse than none.
+SBJ="$(sandbox)"; export HOME="$SBJ"; RCJ="$SBJ/.bashrc"; touch "$RCJ"
+CFGJ="$SBJ/.claude-aka"
+mkdir -p "$CFGJ/bin"; : > "$CFGJ/bin/aka-claude"; chmod 000 "$CFGJ/bin"
+PATH="$IPATH" CT_CONFIG_DIR="$CFGJ" CT_ALIAS="aka-claude" SHELL=/bin/bash HOME="$SBJ" \
+  bash "$INSTALL" --alias --no-auth-inherit >"$SBJ/log" 2>&1
+assert_ok    "J: unwritable bin/ makes --alias fail" test "$?" -ne 0
+assert_eq    "J: shell rc left completely untouched" "0" "$(wc -c <"$RCJ" | tr -d ' ')"
+assert_grep  "J: the failure names the shim and says the rc is untouched" \
+  "shell rc was NOT modified" "$SBJ/log"
+chmod 755 "$CFGJ/bin"
+
+# ── K. --delete-alias reports an unreadable shim instead of silently skipping ──
+SBK="$(sandbox)"; export HOME="$SBK"; RCK="$SBK/.bashrc"; touch "$RCK"
+CFGK="$SBK/.claude-aka"
+PATH="$IPATH" CT_CONFIG_DIR="$CFGK" CT_ALIAS="aka-claude" SHELL=/bin/bash HOME="$SBK" \
+  bash "$INSTALL" --alias --no-auth-inherit >/dev/null 2>&1
+chmod 000 "$CFGK/bin/aka-claude"
+PATH="$IPATH" CT_CONFIG_DIR="$CFGK" CT_ALIAS="aka-claude" SHELL=/bin/bash HOME="$SBK" \
+  bash "$INSTALL" --delete-alias >"$SBK/log" 2>&1
+assert_grep  "K: unreadable shim is reported, not silently skipped" \
+  "Couldn't read" "$SBK/log"
+assert_file  "K: the unreadable file is left in place" "$CFGK/bin/aka-claude"
+chmod 644 "$CFGK/bin/aka-claude"
 
 t_summary
