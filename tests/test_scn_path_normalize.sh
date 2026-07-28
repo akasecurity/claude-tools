@@ -33,6 +33,7 @@ expect {
   -re {Migrate items from an existing}  { send "n\r"; exp_continue }
   -re {Shell alias to launch it}        { send "\r";  exp_continue }
   -re {Set up another config folder}    { send "n\r"; exp_continue }
+  -re {Show how to add ai-tc}           { send "n\r"; exp_continue }
   eof {}
 }
 catch wait result
@@ -60,6 +61,7 @@ expect {
   -re {Shell alias to launch it}        { send "\r";  exp_continue }
   -re {already an alias}                { send "\r";  exp_continue }
   -re {Set up another config folder}    { send "n\r"; exp_continue }
+  -re {Show how to add ai-tc}           { send "n\r"; exp_continue }
   eof {}
 }
 catch wait result

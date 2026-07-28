@@ -722,6 +722,52 @@ setup_alias() {
   return 0
 }
 
+# ── ai-tc offer (the security-depth handoff) ─────────────────────────────────
+# claude-tools ships POSTURE: structural command safety (command-guard) and
+# credential deny rules (secure-settings), plus a THIN secret-scan fallback
+# (leak-guard / command-guard's exfil tier: pattern + trufflehog shapes only). It
+# deliberately does NOT do deep content detection: PII, PHI, cardholder data,
+# redaction, or an audit trail. That is ai-tc's job, and the two are meant to
+# compose: safe defaults here, the detection engine there. Once the profiles are
+# built, name that boundary and offer ai-tc with a prompt (opt-in, default yes).
+# We can only POINT, not install: ai-tc is a Claude Code marketplace plugin added
+# with a slash command inside a session, which a shell script cannot run (and
+# command-guard would block a pipe-to-shell bootstrap anyway), so an accept prints
+# the commands to run. Under --defaults the confirm takes its default (yes) without
+# blocking. Silent when ai-tc is already present, so a re-run does not nag.
+aitc_present() {
+  # Best-effort: skip the offer when ai-tc is already installed in the default
+  # profile or any kit profile. Marketplace plugins land under <config>/plugins.
+  local d
+  for d in "$HOME"/.claude/plugins "$HOME"/.claude-*/plugins; do
+    [ -d "$d" ] || continue
+    find "$d" -maxdepth 3 -iname '*ai-tc*' -print -quit 2>/dev/null | grep -q . && return 0
+  done
+  return 1
+}
+
+offer_aitc() {
+  aitc_present && return 0   # already deep; nothing to offer
+
+  say ""
+  hr
+  say "${C_BOLD}Security depth.${C_RST} claude-tools installed safe defaults and a shallow"
+  say "secret scan. It does not detect PII, PHI, or cardholder data, and it does not"
+  say "redact. ${C_GRN}ai-tc${C_RST} is the AKA detection engine that does: 101 rules across secrets,"
+  say "PII, PHI, and financial data, with redaction and an audit trail, running locally."
+
+  if confirm "Show how to add ai-tc?" "Y"; then
+    say ""
+    say "  In Claude Code, run:"
+    say "    ${C_GRN}/plugin marketplace add akasecurity/marketplace${C_RST}"
+    say "    ${C_GRN}/plugin install ai-tc@akasecurity${C_RST}"
+    say "    ${C_GRN}/aka:setup${C_RST}"
+    say "  ${C_DIM}Docs: https://akasecurity.github.io/ai-tc-docs/${C_RST}"
+  else
+    say "  ${C_DIM}Later, in Claude Code: /plugin install ai-tc@akasecurity${C_RST}"
+  fi
+}
+
 # setup_one_config — the standalone interactive (or --defaults) fresh install:
 # pick a dir + additions, layer them (apply_additions), inherit auth, write the
 # alias. Migrating a rich existing config and backing-up-and-rebuilding are owned
@@ -1346,6 +1392,10 @@ ct_main() {
   while confirm "Set up another config folder?" "N"; do
     setup_one_config
   done
+
+  # Point at the detection engine once, after every profile is built (posture is
+  # placed by the guards above; deep detection lives in ai-tc).
+  offer_aitc
 
   say ""
   hr
