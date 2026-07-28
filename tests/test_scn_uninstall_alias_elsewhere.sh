@@ -30,7 +30,7 @@ echo "test_scn_uninstall_alias_elsewhere:"
 
 SB="$(sandbox)"
 PROFILE="$SB/.claude-aka"
-ALIAS="aka"
+ALIAS="aka-claude"   # the derived default launcher name (bare aka is reserved for ai-tc)
 RC="$SB/.bashrc"
 
 # The user's OWN alias line — same NAME as the kit alias, but a totally different
@@ -43,7 +43,7 @@ USER_ALIAS_LINE="alias ${ALIAS}='git add --all && git status'"
 # install does. We seed the user's OWN `alias aka` line AFTERWARD — this models
 # the user adding their own shortcut later, leaving the kit block keyed on `aka`.
 touch "$RC"
-CT_ADDITIONS="leak-guard" SHELL=/bin/bash HOME="$SB" \
+PATH="$(install_path)" CT_ADDITIONS="leak-guard" SHELL=/bin/bash HOME="$SB" \
   bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$SB/log" 2>&1
 assert_eq "install.sh exits 0" "0" "$?"
 assert_file "profile dir created" "$PROFILE"

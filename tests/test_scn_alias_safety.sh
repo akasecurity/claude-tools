@@ -29,7 +29,9 @@ run_alias() {
   SB="$(sandbox)"; export HOME="$SB"; RC="$SB/.bashrc"; touch "$RC"
   CDIR="$SB/$1"
   [ "${3:-0}" = "1" ] && mkdir -p "$CDIR"
-  SHELL=/bin/bash CT_CONFIG_DIR="$CDIR" CT_ALIAS="$2" \
+  # Hermetic PATH: the installer refuses a launcher name that is already a PATH
+  # command (e.g. a real ai-tc `aka` on the operator's machine).
+  PATH="$(install_path)" SHELL=/bin/bash CT_CONFIG_DIR="$CDIR" CT_ALIAS="$2" \
     bash "$INSTALL" --alias --no-auth-inherit >"$SB/log" 2>&1
   RC_RC=$?
 }

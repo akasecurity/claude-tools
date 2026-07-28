@@ -17,7 +17,7 @@
   <!-- Card B: hardened profile -->
   <g transform="translate(640,134)">
     <rect width="500" height="210" rx="14" fill="#232F3E" stroke="#00E0B8" stroke-opacity="0.55"/>
-    <text x="28" y="50" font-family="ui-monospace,'Geist Mono',monospace" font-size="26" font-weight="700" fill="#00E0B8">aka</text>
+    <text x="28" y="50" font-family="ui-monospace,'Geist Mono',monospace" font-size="26" font-weight="700" fill="#00E0B8">aka-claude</text>
     <g transform="translate(322,30)"><rect width="150" height="34" rx="17" fill="#00E0B8" fill-opacity="0.16"/><text x="75" y="23" text-anchor="middle" font-size="15" font-weight="600" fill="#7DF8E2">isolated + hardened</text></g>
     <text x="28" y="100" font-family="ui-monospace,'Geist Mono',monospace" font-size="19" fill="#7DF8E2">~/.claude-aka</text>
     <text x="28" y="138" font-size="17" fill="#CEFCF4">Own settings, hooks, history, auth —</text>
@@ -30,7 +30,7 @@
   <!-- alias bar -->
   <g transform="translate(60,372)">
     <rect width="1080" height="48" rx="10" fill="#161E27"/>
-    <text x="22" y="31" font-family="ui-monospace,'Geist Mono',monospace" font-size="17"><tspan fill="#6AD9FF">alias</tspan><tspan fill="#DFE9F6"> aka=</tspan><tspan fill="#00E0B8">'CLAUDE_CONFIG_DIR="$HOME/.claude-aka" claude'</tspan></text>
+    <text x="22" y="31" font-family="ui-monospace,'Geist Mono',monospace" font-size="17"><tspan fill="#6AD9FF">alias</tspan><tspan fill="#DFE9F6"> aka-claude=</tspan><tspan fill="#00E0B8">'CLAUDE_CONFIG_DIR="$HOME/.claude-aka" claude'</tspan></text>
   </g>
-  <text x="60" y="452" font-size="16" fill="#6B7D8F">Same binary. Run several side by side — <tspan font-family="ui-monospace,'Geist Mono',monospace" fill="#9AAABB">aka</tspan> secured, <tspan font-family="ui-monospace,'Geist Mono',monospace" fill="#9AAABB">work</tspan>, <tspan font-family="ui-monospace,'Geist Mono',monospace" fill="#9AAABB">play</tspan> — each its own launcher &amp; toolkit.</text>
+  <text x="60" y="452" font-size="16" fill="#6B7D8F">Same binary. Run several side by side — <tspan font-family="ui-monospace,'Geist Mono',monospace" fill="#9AAABB">aka-claude</tspan> secured, <tspan font-family="ui-monospace,'Geist Mono',monospace" fill="#9AAABB">work</tspan>, <tspan font-family="ui-monospace,'Geist Mono',monospace" fill="#9AAABB">play</tspan> — each its own launcher &amp; toolkit.</text>
 </svg>
