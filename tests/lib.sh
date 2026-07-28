@@ -28,6 +28,30 @@ _t_cleanup() { [ -n "${_SANDBOX_ROOT:-}" ] && rm -rf "$_SANDBOX_ROOT"; }
 
 sandbox() { mktemp -d "$_SANDBOX_ROOT/sbx.XXXXXX"; }
 
+# install_path — a HERMETIC PATH for driving install.sh in tests that must be
+# immune to whatever launcher commands the operator's machine has on PATH. The
+# installer now refuses/renames a launcher name that already resolves to a PATH
+# command (e.g. a real ai-tc `aka` CLI, or an installed `aka-claude` shim from a
+# genuine kit install), so a test asserting alias success/names under the
+# operator's full PATH would flake per-machine. This builds a one-off symlink
+# farm of exactly the tools the installer (and the test harness around it) needs
+# — mirroring test_scn_install_missing_deps' stub-PATH technique — and prints it
+# as a ready-to-use PATH value. Tools absent on the host are simply skipped.
+install_path() {
+  local d="$_SANDBOX_ROOT/hermetic-bin" t real
+  if [ ! -d "$d" ]; then
+    mkdir -p "$d"
+    for t in bash sh env jq git awk sed grep egrep fgrep find mktemp dirname \
+             basename cat cp mv rm mkdir rmdir chmod date tr wc sort head tail \
+             cut printf echo ln touch uname sleep comm diff stat tee xargs expr \
+             id whoami bun node curl; do
+      real="$(command -v "$t" 2>/dev/null || true)"
+      [ -n "$real" ] && ln -sf "$real" "$d/$t"
+    done
+  fi
+  printf '%s\n' "$d"
+}
+
 pass() { _PASS=$((_PASS+1)); printf '  \033[32m✓\033[0m %s\n' "$1"; }
 fail() { _FAIL=$((_FAIL+1)); printf '  \033[31m✗ %s\033[0m\n' "$1"; [ -n "${2:-}" ] && printf '      └ %s\n' "$2" >&2; }
 

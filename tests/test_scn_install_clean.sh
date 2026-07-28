@@ -27,7 +27,10 @@ out="$SB/install.log"
 # --defaults (CT_NONINTERACTIVE) with CT_ADDITIONS UNSET means the menu auto-takes
 # each addition's recommended default → the recommended set is installed. SHELL=bash
 # + an existing .bashrc make detect_shell_rc resolve to $RC deterministically.
-SHELL=/bin/bash HOME="$SB" bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$out" 2>&1
+# Hermetic PATH (install_path): the installer refuses/renames a launcher name that
+# is already a PATH command, so an operator's real `aka-claude` shim must not leak in.
+PATH="$(install_path)" SHELL=/bin/bash HOME="$SB" \
+  bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$out" 2>&1
 rc=$?
 
 assert_eq   "install.sh exits 0" "0" "$rc"
@@ -72,12 +75,17 @@ fi
 assert_ok "at least one kit hook was deployed" bash -c "[ '$hook_count' -gt 0 ]"
 
 # ── alias block written to shell rc; points at THIS non-default profile ──────
+# Default launcher name is `aka-claude` (bare `aka` is reserved for the ai-tc CLI).
 assert_lit  "managed alias block opener in rc" \
-  ">>> aka-claude-tools managed: aka" "$RC"
-assert_lit  "alias defines the 'aka' launcher" \
-  "alias aka=" "$RC"
+  ">>> aka-claude-tools managed: aka-claude" "$RC"
+assert_lit  "alias defines the 'aka-claude' launcher" \
+  "alias aka-claude=" "$RC"
 assert_lit  "alias points CLAUDE_CONFIG_DIR at this profile" \
   "CLAUDE_CONFIG_DIR=\"$PROFILE\"" "$RC"
+assert_file "launcher shim placed and on the profile's bin/" "$PROFILE/bin/aka-claude"
+assert_ok   "launcher shim is executable" test -x "$PROFILE/bin/aka-claude"
+assert_lit  "rc block adds the profile bin dir to PATH (guarded)" \
+  "export PATH=\"$PROFILE/bin:\$PATH\"" "$RC"
 n_block=$(grep -c '>>> aka-claude-tools managed' "$RC")
 assert_eq   "exactly one managed alias block in rc" "1" "$n_block"
 
