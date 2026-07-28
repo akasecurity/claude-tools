@@ -138,17 +138,39 @@ assert_lit "G: aka-claude alias points at the profile" \
 assert_file "G: aka-claude shim placed" "$CFGG/bin/aka-claude"
 assert_ok   "G: aka-claude shim executable" test -x "$CFGG/bin/aka-claude"
 
-# ── H. rename sweeps the stale marker-carrying shim ───────────────────────────
+# ── H. a second launcher name leaves the first one intact ─────────────────────
+# The old name's managed rc block survives a rename, so its shim must too —
+# removing one without the other would leave that name half-working (alias fires,
+# PATH lookup and `aka <name>` dispatch do not). Both go together, via
+# --delete-alias or uninstall.
 PATH="$IPATH" CT_CONFIG_DIR="$CFGG" CT_ALIAS="renamed" SHELL=/bin/bash HOME="$SBG" \
   bash "$INSTALL" --alias --no-auth-inherit >"$SBG/log2" 2>&1
 assert_eq   "H: rename --alias exits 0" "0" "$?"
 assert_file "H: new shim placed" "$CFGG/bin/renamed"
-[ -e "$CFGG/bin/aka-claude" ] && fail "H: stale kit shim swept on rename" "still present" \
-                              || pass "H: stale kit shim swept on rename"
-# A user's own (marker-less) file in bin/ is NEVER swept by a rename.
+assert_file "H: prior shim kept (its rc block is still live)" "$CFGG/bin/aka-claude"
+assert_lit  "H: prior alias block still present" \
+  "alias aka-claude='CLAUDE_CONFIG_DIR=\"$CFGG\" claude'" "$RCG"
+# A user's own (marker-less) file in bin/ is untouched.
 printf 'user data\n' > "$CFGG/bin/keep-me"
 PATH="$IPATH" CT_CONFIG_DIR="$CFGG" CT_ALIAS="renamed2" SHELL=/bin/bash HOME="$SBG" \
   bash "$INSTALL" --alias --no-auth-inherit >"$SBG/log3" 2>&1
-assert_file "H: marker-less user file in bin/ survives a rename" "$CFGG/bin/keep-me"
+assert_file "H: marker-less user file in bin/ survives" "$CFGG/bin/keep-me"
+
+# ── I. a colon in the profile path never yields a PATH entry ──────────────────
+# PATH is colon-delimited: embedding such a dir would split into two entries, one
+# RELATIVE — a command-hijack foothold. The alias and shim are still written.
+SBI="$(sandbox)"; export HOME="$SBI"; RCI="$SBI/.bashrc"; touch "$RCI"
+CFGI="$SBI/.claude-a:b"
+PATH="$IPATH" CT_CONFIG_DIR="$CFGI" CT_ALIAS="aka-claude" SHELL=/bin/bash HOME="$SBI" \
+  bash "$INSTALL" --alias --no-auth-inherit >"$SBI/log" 2>&1
+assert_eq    "I: colon-dir --alias exits 0" "0" "$?"
+assert_lit   "I: alias line still written" \
+  "alias aka-claude='CLAUDE_CONFIG_DIR=\"$CFGI\" claude'" "$RCI"
+assert_file  "I: shim still written" "$CFGI/bin/aka-claude"
+assert_ngrep "I: NO PATH export for a colon-bearing dir" "export PATH=" "$RCI"
+assert_grep  "I: the skip is reported to the user" "contains ':'" "$SBI/log"
+# Sourcing the rc must not introduce a relative PATH entry.
+REL="$(bash -c "export PATH=/usr/bin:/bin; source '$RCI'; printf '%s' \"\$PATH\"" | tr ':' '\n' | grep -vc '^/' || true)"
+assert_eq "I: no relative PATH entries after sourcing" "0" "$REL"
 
 t_summary

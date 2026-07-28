@@ -17,6 +17,8 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   shares the name is never deleted), and `uninstall.sh`'s profile removal covers it for free.
 - **PATH-conflict check**: `--alias` refuses (strict) or offers an alternate name
   (interactive) before claiming a launcher name that is already a command on PATH.
+  A profile path containing a `:` gets the alias and shim but no `PATH` entry — a
+  colon would split it into a relative `PATH` entry — and the installer says so.
 
 ### Changed
 - **Default launcher name is `aka-claude`** (was `aka`) for `~/.claude-aka` and the fallback

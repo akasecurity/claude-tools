@@ -54,11 +54,15 @@
 #                      shell rc, so the agent invokes THIS rather than editing the rc
 #                      itself — which keeps command-guard strict.
 #                      Reviews the rc + its full source chain; writes an idempotent
-#                      managed block, or exits non-zero on an unresolved name
-#                      collision (the caller picks another name). Requires CT_CONFIG_DIR
-#                      + CT_ALIAS; implies non-interactive.
-#   --delete-alias     Remove the managed alias block for $CT_ALIAS from the shell rc
-#                      and exit. The ONLY safe way for an agent to delete a launcher
+#                      managed block (alias + guarded PATH export) and the executable
+#                      shim at <CT_CONFIG_DIR>/bin/<CT_ALIAS>, or exits non-zero on an
+#                      unresolved name collision — either an existing alias or a name
+#                      that is already a command on PATH (the caller picks another
+#                      name). Requires CT_CONFIG_DIR + CT_ALIAS; implies non-interactive.
+#   --delete-alias     Remove the managed alias block for $CT_ALIAS from the shell rc,
+#                      along with the marker-carrying launcher shim at
+#                      <profile>/bin/$CT_ALIAS (and the bin/ dir if it empties), then
+#                      exit. The ONLY safe way for an agent to delete a launcher
 #                      alias — same rc-write gate as --alias. Optional CT_CONFIG_DIR:
 #                      if supplied, refuses to delete if the alias resolves to a
 #                      DIFFERENT profile (prevents accidental cross-profile clobber).
@@ -554,33 +558,39 @@ seed_auth() {
 # that merely shares the name.
 AKA_SHIM_MARKER='# aka-claude-tools launcher shim — managed by install.sh; safe to delete with the profile.'
 
-# write_launcher_shim <config_dir> <name> — (re)write the executable shim and
-# sweep stale same-profile shims left by a prior launcher name (marker-gated:
-# only files carrying AKA_SHIM_MARKER are ever removed). config_dir has already
-# passed assert_safe_config_dir (no quotes/backslashes/$), so embedding it in
-# double quotes is safe — the same reasoning as the alias body.
+# write_launcher_shim <config_dir> <name> — (re)write the executable shim.
+# config_dir has already passed assert_safe_config_dir (no quotes/backslashes/$),
+# so embedding it in double quotes is safe — the same reasoning as the alias body.
+# A shim left behind by a previous launcher name is NOT swept: its managed rc
+# block survives a rename too, so removing one without the other would leave the
+# old name half-working. --delete-alias and uninstall.sh remove both together.
 write_launcher_shim() {
-  local config_dir="$1" name="$2" shim old
+  local config_dir="$1" name="$2" shim
   mkdir -p "$config_dir/bin"
-  for old in "$config_dir/bin"/*; do
-    [ -f "$old" ] || continue
-    [ "$(basename "$old")" = "$name" ] && continue
-    grep -qF "$AKA_SHIM_MARKER" "$old" 2>/dev/null && rm -f "$old"
-  done
   shim="$config_dir/bin/$name"
   printf '#!/usr/bin/env bash\n%s\nCLAUDE_CONFIG_DIR="%s" exec claude "$@"\n' \
     "$AKA_SHIM_MARKER" "$config_dir" > "$shim"
   chmod +x "$shim"
 }
 
+# launcher_path_representable <config_dir> — PATH is colon-delimited, so a config
+# dir containing a colon cannot be expressed as a PATH entry: the shell would
+# split it into two entries, one of them RELATIVE (a command-hijack foothold).
+# Colons are legal in Unix dir names and assert_safe_config_dir allows them (they
+# are inert inside the quoted alias body), so the PATH line is gated here instead.
+launcher_path_representable() {
+  case "$1" in *:*) return 1 ;; *) return 0 ;; esac
+}
+
 # launcher_block_content <config_dir> <name> — the managed rc block body: the
 # alias line (uninstall.sh + --enumerate key off its literal CLAUDE_CONFIG_DIR="…")
-# plus a guarded PATH export for the shim dir. $PATH is emitted LITERALLY (the rc
-# expands it at source time), which is why this builds the text with printf
-# formats rather than interpolating in this shell.
+# plus, when the dir is PATH-representable, a guarded PATH export for the shim
+# dir. $PATH is emitted LITERALLY (the rc expands it at source time), which is why
+# this builds the text with printf formats rather than interpolating in this shell.
 launcher_block_content() {
   local config_dir="$1" name="$2"
   printf "alias %s='CLAUDE_CONFIG_DIR=\"%s\" claude'\n" "$name" "$config_dir"
+  launcher_path_representable "$config_dir" || return 0
   printf 'case ":$PATH:" in *":%s/bin:"*) ;; *) export PATH="%s/bin:$PATH" ;; esac' \
     "$config_dir" "$config_dir"
 }
@@ -624,6 +634,10 @@ _write_launcher() {
   write_launcher_shim "$config_dir" "$name"
   meta_set "$config_dir" alias "$name"
   ok "Aliased ${C_BOLD}${name}${C_RST} → $config_dir  ${C_DIM}(alias + PATH shim, in $rc)${C_RST}"
+  if ! launcher_path_representable "$config_dir"; then
+    warn "Folder path contains ':' — no PATH entry was added (a colon would split it into a relative PATH entry)."
+    say "  ${C_DIM}The alias works; the shim runs by full path:${C_RST}  ${config_dir}/bin/${name}"
+  fi
   say "  ${C_DIM}Open a new shell (or: source $rc), then run:${C_RST}  ${C_BOLD}${name}${C_RST}"
 }
 
