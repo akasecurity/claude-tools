@@ -8,6 +8,8 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+## [0.5.0] the aka-claude launcher: PATH shim + name-conflict gate
+
 ### Added
 - **PATH-visible launcher shim**: alongside the shell alias, the installer now writes an
   executable shim at `<profile>/bin/<name>` and adds a guarded `PATH` export to the managed
