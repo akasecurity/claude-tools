@@ -56,11 +56,13 @@ eq('cat ~/.config/gh/hosts.yml', null);
 eq('cat .git-credentials', null);
 eq('cat ~/.docker/config.json', null);
 eq('cat ~/.npmrc', null);
-eq('head -20 big.log', 'rtk read big.log --max-lines 20');
-eq('head --lines=5 a.txt', 'rtk read a.txt --max-lines 5');
+// head is no longer rewritten in ANY form: `rtk read --max-lines N` renders ~floor(N/2)
+// lines, so the rewrite silently halved the window the caller asked for.
+eq('head -20 big.log', null);
+eq('head --lines=5 a.txt', null);
 eq('head big.log', null);            // head without -N → no rewrite
-eq('head -n 20 big.log', null);      // PARITY: old hook matched only `head -N`, not `-n N`
-eq('head -n20 big.log', null);       // PARITY: `-nN` likewise not rewritten (unchanged)
+eq('head -n 20 big.log', null);
+eq('head -n20 big.log', null);
 eq('head -5 ~/.netrc', null);        // credential path → not rewritten
 eq('head -10 ~/.aws/credentials', null);
 
@@ -160,10 +162,32 @@ for (const command of [
 
 eq('grep -n needle file.txt', 'rtk grep -n needle file.txt');
 eq('grep -v needle file.txt', 'rtk grep -v needle file.txt');
-eq('rg -n needle src', 'rtk rg -n needle src');
-eq('rg --json needle src', 'rtk rg --json needle src');
 eq('grep needle ~/.ssh/id_rsa', null);
+// rg is never rewritten: rtk forwards ripgrep's `--pre <cmd>` (arbitrary exec), so
+// `Bash(rtk rg:*)` can't be allowlisted, and an unapprovable rewrite is pure prompt
+// friction. Leaving rg alone also keeps the user's own Bash(rg:*) rule matching.
+eq('rg -n needle src', null);
+eq('rg --json needle src', null);
 eq('rg needle project/.env', null);
+eq('rg --pre ./x.sh needle .', null);
+
+// A standalone -h/--help is claimed by rtk's own parser before it reaches the underlying
+// tool, which would print rtk usage and exit 0 — an empty result that reads as "no match".
+// Applies to every fronted command, not just search.
+eq('grep -h needle a.txt b.txt', null);
+eq('grep --help', null);
+eq('ls -h', null);
+eq('wc -h a.txt', null);
+eq('diff -h a.txt b.txt', null);
+eq('git -h status', null);
+eq('find . -h', null);
+// Bundled short flags are NOT the help flag and must keep rewriting.
+eq('ls -lh', 'rtk ls -lh');
+eq('grep -rh needle .', 'rtk grep -rh needle .');
+eq('grep -nh needle a.txt b.txt', 'rtk grep -nh needle a.txt b.txt');
+// -h inside a word (a path, a pattern) is not a flag.
+eq('cat foo-h.txt', 'rtk read foo-h.txt');
+eq('grep needle a-h.txt', 'rtk grep needle a-h.txt');
 
 console.log(`\nrtk-safe.test: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

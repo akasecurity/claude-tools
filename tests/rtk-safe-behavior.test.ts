@@ -2,7 +2,7 @@
 // directory; real RTK checks are optional locally and required by the CI job.
 import { strict as assert } from 'node:assert';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { rewrite, supportedVersion } from '../config/hooks/rtk-safe.ts';
@@ -48,18 +48,29 @@ try {
   });
 
   writeFileSync(join(sb, 'input.txt'), 'needle\nother\nneedle two\n');
+  writeFileSync(join(sb, 'b.txt'), 'needle elsewhere\n'); // second operand for `grep -h`
+  // Long enough that `rtk read --max-lines N` truncates for every N under test — the
+  // head counterfactual is only meaningful when truncation is actually in play.
+  writeFileSync(join(sb, 'big.txt'), Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n') + '\n');
   function shell(command: string) {
     return spawnSync('/bin/bash', ['-c', rewrite(command) ?? command], { cwd: sb, env, encoding: 'utf8', timeout: 5000 });
   }
-  check('head pipeline still counts exactly two lines', () => {
+  // NOTE: each of these carries a shell operator, so `rewrite()` returns null and the
+  // ORIGINAL command runs. That is the point — they are skip-guard regressions: if the
+  // operator guard ever regressed, the rewritten form would change the observed result.
+  // They are not evidence that any rewrite is correct; the real-RTK block below is.
+  check('skip guard: a piped head is left unrewritten, so wc sees two lines', () => {
+    assert.equal(rewrite('head -2 input.txt | wc -l'), null);
     const r = shell('head -2 input.txt | wc -l');
     assert.equal(r.status, 0, r.stderr); assert.equal(r.stdout.trim(), '2');
   });
-  check('head followed by another command retains both outputs', () => {
+  check('skip guard: a chained head is left unrewritten, so both outputs survive', () => {
+    assert.equal(rewrite('head -2 input.txt && echo done'), null);
     const r = shell('head -2 input.txt && echo done');
     assert.equal(r.status, 0, r.stderr); assert.equal(r.stdout, 'needle\nother\ndone\n');
   });
-  check('redirected file reads preserve bytes', () => {
+  check('skip guard: a redirected read is left unrewritten, so bytes are preserved', () => {
+    assert.equal(rewrite('cat input.txt > copy.txt'), null);
     assert.equal(shell('cat input.txt > copy.txt').status, 0);
     assert.equal(readFileSync(join(sb, 'copy.txt'), 'utf8'), 'needle\nother\nneedle two\n');
   });
@@ -67,7 +78,11 @@ try {
   // These literal dangerous commands must not match a shipped prefix approval.
   // This tests our policy, not Claude Code's permission matcher implementation.
   const allow: string[] = JSON.parse(readFileSync(resolve(import.meta.dir, '../config/rtk-allowlist.json'), 'utf8')).permissions.allow;
-  for (const command of ['rtk find . -delete', 'rtk find . -exec sh payload.sh ;', 'rtk git branch -D topic', 'rtk git branch -m renamed']) {
+  for (const command of ['rtk find . -delete', 'rtk find . -exec sh payload.sh ;', 'rtk git branch -D topic', 'rtk git branch -m renamed',
+    // ripgrep's --pre runs an arbitrary binary and rtk forwards it, so `Bash(rtk rg:*)`
+    // would be silent code execution. `rtk grep` IS approved — it dispatches to the
+    // system grep, which has no exec primitive (asserted against the real binary below).
+    'rtk rg --pre /tmp/payload.sh needle .']) {
     check(`no kit prefix approval for ${command}`, () => {
       assert.equal(allow.some(rule => {
         const prefix = rule.match(/^Bash\((.*):\*\)$/)?.[1];
@@ -90,10 +105,6 @@ try {
       ['grep -q needle input.txt', '', 0],
       ['grep missing input.txt', '', 1],
       ["grep 'needle+' input.txt", '', 1], // BRE: + is literal
-      ['rg -n needle input.txt', '1:needle\n3:needle two\n', 0],
-      ['rg -v needle input.txt', 'other\n', 0],
-      ['rg missing input.txt', '', 1],
-      ["rg 'needle+' input.txt", 'needle\nneedle two\n', 0], // regex quantifier
     ] as const) {
       check(`real RTK preserves search contract: ${command}`, () => {
         const r = shell(command); assert.equal(r.status, status, r.stderr); assert.equal(r.stdout, stdout);
@@ -102,6 +113,63 @@ try {
     check('real RTK preserves search errors', () => {
       const r = shell('grep needle nonexistent-file');
       assert.equal(r.status, 2); assert.notEqual(r.stderr, '');
+    });
+
+    // Coverage for the NON-search rules — its absence is what let two real divergences
+    // ship: `head -N` -> `rtk read --max-lines N` (renders ~N/2 lines) and a standalone
+    // `-h` eaten by rtk's own parser.
+    const raw = (command: string) =>
+      spawnSync('/bin/bash', ['-c', command], { cwd: sb, env, encoding: 'utf8', timeout: 5000 });
+    const outcome = (r: ReturnType<typeof raw>) => `${r.status}\u0000${r.stdout}`;
+
+    // A rule we DO apply: running the rewritten form must match the native tool.
+    const rewriteMatchesNative = (command: string) => {
+      const rewritten = rewrite(command);
+      assert.notEqual(rewritten, null, `expected a rewrite for: ${command}`);
+      assert.equal(outcome(raw(rewritten!)), outcome(raw(command)), `drift: ${command} -> ${rewritten}`);
+    };
+    // A rule we deliberately DON'T apply. Asserting only "it isn't rewritten" would be
+    // tautological, so also pin the counterfactual: the form we refuse to emit really
+    // does diverge from the native tool. If rtk ever fixes it, this fails and tells us
+    // to reconsider the skip — rather than leaving the skip in place forever unexamined.
+    const skippedForGoodReason = (command: string, wouldHaveBeen: string) => {
+      assert.equal(rewrite(command), null, `expected no rewrite for: ${command}`);
+      assert.notEqual(outcome(raw(wouldHaveBeen)), outcome(raw(command)),
+        `'${wouldHaveBeen}' no longer diverges from '${command}' — re-evaluate the skip`);
+    };
+
+    check('real RTK: cat of a whole file is byte-identical', () => rewriteMatchesNative('cat input.txt'));
+    for (const n of [1, 2, 20]) {
+      check(`head -${n} skipped, and rtk read --max-lines ${n} really does diverge`, () =>
+        skippedForGoodReason(`head -${n} big.txt`, `rtk read big.txt --max-lines ${n}`));
+    }
+    for (const [command, wouldHaveBeen] of [
+      ['grep -h needle input.txt b.txt', 'rtk grep -h needle input.txt b.txt'],
+      ['ls -h', 'rtk ls -h'],
+    ] as const) {
+      check(`standalone -h skipped, and rtk would have eaten it: ${command}`, () =>
+        skippedForGoodReason(command, wouldHaveBeen));
+    }
+    // The exec-primitive criterion that decides which search verbs may be approved, and
+    // therefore which ones rtk-safe rewrites at all. Both halves are asserted against the
+    // real binary, because the whole policy rests on them staying true.
+    const preScript = (marker: string) => {
+      writeFileSync(join(sb, 'pre.sh'), `#!/bin/sh\ntouch ${marker}\ncat "$1"\n`, { mode: 0o755 });
+    };
+    check('rtk grep has no exec primitive (why Bash(rtk grep:*) is approved)', () => {
+      const marker = join(sb, 'grep-pre-ran');
+      preScript(marker);
+      const r = raw('rtk grep --pre ./pre.sh needle input.txt');
+      assert.notEqual(r.status, 0, 'expected grep to reject --pre, not run it');
+      assert.equal(existsSync(marker), false, 'rtk grep executed a preprocessor binary');
+    });
+    check('rtk rg DOES exec --pre (why rg is neither approved nor rewritten)', () => {
+      const marker = join(sb, 'rg-pre-ran');
+      preScript(marker);
+      raw('rtk rg --pre ./pre.sh needle input.txt');
+      assert.equal(existsSync(marker), true,
+        'rtk rg no longer executes --pre — re-evaluate whether rg can be rewritten/approved');
+      assert.equal(rewrite('rg needle input.txt'), null, 'rg must not be rewritten');
     });
     check('npm lifecycle-named scripts remain scripts, not package operations', () => {
       // Capture npm argv without allowing any real package operation/network.

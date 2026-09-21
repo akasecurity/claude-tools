@@ -11,7 +11,7 @@
  * Design: a single ordered rule table (RULES). Each rule inspects the leading command and
  * returns the rewritten command body or null ("not mine"); the first non-null wins. Most
  * rules just front the command with `rtk` (optionally gated to a safe subcommand set); a
- * few normalize a form (head -N → rtk read --max-lines N, cat → rtk read).
+ * few normalize a form (cat → rtk read, eslint → rtk lint).
  * Simple unquoted `NAME=val` env assignments are split off for matching
  * and re-attached verbatim to the rewrite.
  *
@@ -20,9 +20,10 @@
  *   - `rtk` is absent, older than 0.49.0, a prerelease, or cannot report its version;
  *   - the command already invokes rtk or contains shell operators, substitutions,
  *     escapes, comments, or multiple lines (even quoted operators conservatively skip);
+ *   - the command carries a standalone `-h`/`--help` (see HELP_FLAG);
  *   - no rule matches.
  *
- * Credential safety: a `cat`/`head`/`grep`/`rg` whose LITERAL text names a credential-bearing
+ * Credential safety: a `cat`/`grep` whose LITERAL text names a credential-bearing
  * path is left UNREWRITTEN, so it stays a reader Claude Code recognizes and the
  * secure-settings Read(...) deny still binds (rewriting to `rtk read` — an unrecognized
  * reader — would slip it past that deny). This is a best-effort guard on the obvious,
@@ -46,6 +47,19 @@ interface HookInput {
 const ENV_PREFIX = /^([A-Za-z_]\w*=[A-Za-z0-9_./:@%+,=~-]* +)+/;
 // Command already routed through rtk (bare `rtk …` or a path `…/rtk …`).
 const ALREADY_RTK = /^(\S*\/)?rtk\s/;
+// A STANDALONE `-h`/`--help` anywhere in the command. rtk's own argument parser claims
+// these for its per-subcommand --help BEFORE the flags reach the underlying tool, so a
+// rewrite would print rtk's usage and exit 0 — a silently empty result that reads like
+// "no matches" (verified on 0.49.0 for grep -h, ls -h, diff -h, wc -h, git -h). Help
+// output is already short, so skipping costs no meaningful compression. Bundled forms
+// (-lh, -rh, -nh) are passed through by rtk untouched and stay eligible.
+//
+// Deliberately blanket rather than per-command. rtk forwards `-h` for a few pure
+// passthrough subcommands (`rtk psql -h <host>` reaches psql intact), so this gives up
+// compression on those. That's the accepted price: which subcommands claim `-h` is an
+// rtk-internal detail that can shift between releases, and the failure mode it prevents
+// is silent (right-looking output, exit 0) while the cost is merely a missed saving.
+const HELP_FLAG = /(?:^|\s)(?:-h|--help)(?=\s|$)/;
 
 // Compatibility floor, tested against the real binary. Unknown/prerelease builds
 // fail open to the original command rather than enabling unverified rewrites.
@@ -132,7 +146,7 @@ const RULES: Rule[] = [
     return CARGO_SUBCMDS.has(rest.split(/\s+/, 1)[0] ?? '') ? front(b) : null;
   },
 
-  // file reads — cat/head become `rtk read`; a credential-path target is left alone.
+  // file reads — cat becomes `rtk read`; a credential-path target is left alone.
   (b) => {
     if (!withArgs(b, 'cat')) return null;
     if (CRED_PATH.test(b)) return null;
@@ -140,21 +154,27 @@ const RULES: Rule[] = [
     if (/(?:^|\s)["']?-/.test(b.slice(4))) return null;
     return 'rtk read ' + b.slice('cat'.length).trimStart();
   },
-  (b) => {
-    if (!startsWithWord(leadWord(b), 'head')) return null;
-    if (CRED_PATH.test(b)) return null;
-    // head -N file / head --lines=N file → rtk read file --max-lines N
-    const m = b.match(/^head\s+(?:-(\d+)|--lines=(\d+))\s+(.+)$/);
-    if (m) {
-      if (/(?:^|\s)["']?-/.test(m[3])) return null;
-      const n = m[1] ?? m[2];
-      return `rtk read ${m[3]} --max-lines ${n}`;
-    }
-    return null;
-  },
-  // RTK >= 0.49 preserves native -n/-v and the selected search engine. Keep
+  // `head -N` is deliberately NOT rewritten. `rtk read --max-lines N` is not a head
+  // equivalent: on 0.49.0 it renders floor(N/2) content lines plus a "[… more lines]"
+  // marker (head -1 → ZERO content lines, head -20 → 10), so the model silently gets
+  // half the window it asked for. It also drops the `==> file <==` banners on a
+  // multi-file head and applies the budget across the concatenation rather than per
+  // file. Re-enable only if rtk grows a true head-N mode, and pin it with a real-RTK
+  // equivalence check in rtk-safe-behavior.test.ts before shipping.
+
+  // grep — RTK >= 0.49 preserves native -n/-v and dispatches to the system grep. Keep
   // credential reads raw, and never compress a pipe's intermediate data (below).
-  (b) => ((withArgs(b, 'grep') || withArgs(b, 'rg')) && !CRED_PATH.test(b) ? front(b) : null),
+  //
+  // `rg` is deliberately NOT rewritten, even though rtk compresses it well. rtk forwards
+  // ripgrep's flags verbatim, including `--pre <cmd>`, which EXECUTES an arbitrary binary
+  // — so `Bash(rtk rg:*)` can never be added to rtk-allowlist.json (a prefix rule approves
+  // every suffix). Rewriting rg without approving it is all cost and no benefit: the
+  // user's own `Bash(rg:*)` stops matching and every search starts prompting, for a
+  // token saving they may well disable the addition to avoid. Left alone, rg behaves
+  // exactly as it did before this hook existed. grep has no such exec primitive, so it
+  // gets both the rewrite and the approval. Re-evaluate only if rtk grows a way to run
+  // rg with the exec flags refused.
+  (b) => (withArgs(b, 'grep') && !CRED_PATH.test(b) ? front(b) : null),
   (b) => (startsWithWord(leadWord(b), 'ls') ? front(b) : null),
   (b) => (startsWithWord(leadWord(b), 'tree') ? front(b) : null),
   (b) => (withArgs(b, 'find') ? front(b) : null),
@@ -254,6 +274,7 @@ export function rewrite(command: string): string | null {
   // are skipped. Compression belongs at the display boundary, never before a
   // pipe/redirection, and options must not migrate across command boundaries.
   if (ALREADY_RTK.test(command) || /[|&;<>`$(){}\\\n\r#]/.test(command)) return null;
+  if (HELP_FLAG.test(command)) return null;
   const prefix = command.match(ENV_PREFIX)?.[0] ?? '';
   // The runtime version probe uses the hook's PATH. Do not rewrite onto a
   // different, unverified RTK selected by a command-local PATH assignment.
