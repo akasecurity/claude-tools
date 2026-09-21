@@ -426,9 +426,15 @@ reconcile_managed_perms() {
   local key arr_new arr_exist arr_ret added retired_present n_add n_ret shown=0
   for key in deny allow ask; do
     arr_new="$(jq -c --arg k "$key" '.permissions[$k] // []' <<<"$add")"
-    # Only reconcile arrays the kit actually provides this run — never touch an
-    # array the engineer selected no addition for.
-    [ "$(jq 'length' <<<"$arr_new")" = "0" ] && continue
+    # NOTE: an array the kit ships nothing into this run is still reconciled, because
+    # RETIREMENT is independent of what's selected. permissions.allow is supplied only
+    # by rtk-allowlist.json, so gating on a non-empty arr_new meant a user who upgraded
+    # while DESELECTING rtk-safe kept every retired allow rule forever — exactly the
+    # users who most need `Bash(rtk find:*)` (which passes -exec/-delete through) gone.
+    # Nothing is invented for an unselected array: `added` below is ([] - existing) = [],
+    # so only the retire branch can fire, and it only ever touches strings the kit itself
+    # shipped in the past (.retired[]). Rules the kit never shipped stay untouched.
+    # The real "nothing to do" test is the n_add/n_ret guard a few lines down.
     arr_exist="$(jq -c --arg k "$key" '.permissions[$k] // []' <<<"$existing")"
     arr_ret="$(jq -c --arg k "$key" '(.retired[$k]) // []' <<<"$RETIRED_PERMS")"
 
