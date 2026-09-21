@@ -65,6 +65,10 @@ const FALLBACK_OUTBOUND = /\b(curl|wget|nc|ncat|socat|fetch)\b/i;
 // separator after each \S+ keeps the quantifier linear (no catastrophic backtracking).
 const PIPE_TO_SHELL_RAW = /\|&?\s*(?:(?:\S*\/)?env\s+(?:\S+\s+)*)?(?:\S*\/)?(?:sh|bash|zsh)\b/i;
 const STARTUP_WRITE_RAW = /(?:>|\btee\b|\bsed\b|\bcp\b|\bmv\b|\binstall\b|\bln\b|\bdd\b)[^\n]*\.(?:zshrc|zshenv|zprofile|bashrc|bash_profile|profile)\b/;
+// Raw fallback for the search-tool exec vector. Deliberately broader than the tokenizer
+// path (any of the three markers anywhere on the line), since the fallback must be a
+// conservative SUPERSET — over-blocking a mention of `--pre` is acceptable.
+const SEARCH_EXEC_RAW = /(?:^|\s)--(?:pre|hostname-bin)(?:[=\s]|$)|\bRIPGREP_CONFIG_PATH=/;
 
 // A shell startup-file basename (leading dot) — the persistence-vector targets.
 const STARTUP_BASENAME = /^\.(zshrc|zshenv|zprofile|bashrc|bash_profile|profile)$/;
@@ -393,6 +397,62 @@ function detectPipeToShell(toks: Tok[]): boolean {
   return false;
 }
 
+// Search-tool EXEC vector. ripgrep can be made to run an arbitrary binary, and the kit
+// auto-approves `Bash(rtk rg:*)` for token savings — a prefix rule, so it approves every
+// suffix. This closes the vector at the security boundary instead, which is what makes
+// that approval safe. Three channels, all verified live against rg 14.x / rtk 0.49.0:
+//
+//   --pre <CMD>           runs CMD on every searched file  (confirmed exec)
+//   --hostname-bin <CMD>  runs CMD to resolve the hostname for hyperlinks
+//   RIPGREP_CONFIG_PATH=  points rg at a config FILE whose contents are flags — so it
+//                         injects `--pre` indirectly, without either flag appearing in
+//                         the command text (confirmed exec)
+//
+// `--search-zip`/`-z` is deliberately NOT blocked: it spawns only rg's built-in list of
+// decompressors (gzip/xz/zstd/…) found on PATH, so the attacker picks no binary — that's
+// a PATH-hijack class, not a flag-injection one, and blocking it would break legitimate
+// compressed searches.
+function detectSearchExec(toks: Tok[]): boolean {
+  // Same simple-command split detectStartupWrite uses. Duplicated rather than extracted:
+  // that detector is a live security boundary and refactoring it is not worth the risk
+  // here (every token-stream consumer has to be re-verified when its shape changes).
+  let cur: Tok[] = [];
+  const cmds: Tok[][] = [];
+  for (const t of toks) {
+    if (t.op && (t.v === '|' || t.v === '||' || t.v === '&&' || t.v === ';' || t.v === '&' || t.v === '\n')) { if (cur.length) cmds.push(cur); cur = []; }
+    else cur.push(t);
+  }
+  if (cur.length) cmds.push(cur);
+  for (const sc of cmds) {
+    const words = sc.filter((t) => !t.op).map((t) => t.v);
+    if (!words.length) continue;
+    let ci = 0;
+    while (ci < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[ci])) {
+      // The config-file channel needs no flag in the command text, and has no legitimate
+      // agent use — treat the assignment itself as the vector, whatever verb follows.
+      if (/^RIPGREP_CONFIG_PATH=/.test(words[ci])) return true;
+      ci++;
+    }
+    if (ci >= words.length) continue;
+    // Which verbs reach a search engine: `rg …`, `rtk rg …`, and `rtk grep …`. rtk grep
+    // dispatches to the system grep today (which rejects --pre), but it is rtk's choice
+    // to make and could change between releases — cover it rather than depend on that.
+    let ai = ci + 1;
+    const verb = cmdBasename(words[ci]);
+    if (verb === 'rtk') {
+      const sub = (words[ci + 1] ?? '').toLowerCase();
+      if (sub !== 'rg' && sub !== 'grep') continue;
+      ai = ci + 2;
+    } else if (verb !== 'rg') continue;
+    for (let i = ai; i < words.length; i++) {
+      const w = words[i];
+      if (w === '--') break; // everything after `--` is an operand, not a flag
+      if (/^--(?:pre|hostname-bin)(?:=|$)/.test(w)) return true;
+    }
+  }
+  return false;
+}
+
 // startup-file WRITE: (1) a redirection (> / >> / fd>) whose target is a startup file,
 // or (2) a write-capable command with a startup file as its DESTINATION. Direction-aware:
 // a startup file as a cp/mv/ln SOURCE is a read and is NOT flagged.
@@ -530,15 +590,17 @@ function main(): void {
   // tokenizer throws on pathological input (e.g. nesting past the depth cap), fall back
   // to the CONSERVATIVE raw-string regexes — over-block, never silently allow. This is
   // the sole Bash guard, so a parser failure must NEVER fail open.
-  let pipeToShell: boolean, startupWrite: boolean;
+  let pipeToShell: boolean, startupWrite: boolean, searchExec: boolean;
   try {
     const toks = tokenize(command);
     pipeToShell = detectPipeToShell(toks);
     startupWrite = detectStartupWrite(toks);
+    searchExec = detectSearchExec(toks);
   } catch {
     console.error('[aka-claude-tools SECURITY] ⚠️ command-guard: command too complex to parse precisely — falling back to strict structural checks (may over-block).');
     pipeToShell = PIPE_TO_SHELL_RAW.test(command);
     startupWrite = STARTUP_WRITE_RAW.test(command);
+    searchExec = SEARCH_EXEC_RAW.test(command);
   }
 
   // Pipe-to-shell — structural, patterns-independent.
@@ -550,6 +612,13 @@ function main(): void {
   // Startup-file write — structural persistence-vector check.
   if (startupWrite) {
     console.error('[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): writing to a shell startup file (~/.zshrc, ~/.bashrc, …) is a persistence vector. Your dotfiles are Edit/Write-denied; a Bash redirection bypasses that. If intentional, run it in your own shell (e.g. a `! <cmd>` prompt); for a profile alias use `./install.sh --alias`.');
+    process.exit(2);
+  }
+
+  // Search-tool exec — structural. Paired with the `Bash(rtk rg:*)` approval in
+  // rtk-allowlist.json: that prefix rule is only safe because this blocks the exec flags.
+  if (searchExec) {
+    console.error('[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): ripgrep\'s --pre / --hostname-bin run an arbitrary binary, and RIPGREP_CONFIG_PATH injects flags from a file. `rtk rg` is auto-approved for token savings, so these are blocked here. Search without them, or run it in your own shell (e.g. a `! <cmd>` prompt).');
     process.exit(2);
   }
 
