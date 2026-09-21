@@ -9,15 +9,32 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 ## [Unreleased]
 
 ### Fixed
-- `rtk-safe` restores standalone `grep`/`rg` rewriting with their original engine
-  on stable RTK >= 0.49.0. Older, missing, prerelease, or unresponsive binaries
-  leave commands unchanged. Shell operators, substitutions, and command-local
-  `PATH` overrides are skipped so compressed output cannot corrupt pipelines or files.
+- `rtk-safe` restores standalone `grep` rewriting on stable RTK >= 0.49.0, with its
+  native flags, exit codes, and regex dialect preserved. Older, missing, prerelease,
+  or unresponsive binaries leave commands unchanged. Shell operators, substitutions,
+  and command-local `PATH` overrides are skipped so compressed output cannot corrupt
+  pipelines or files. `Bash(rtk grep:*)` is auto-approved so this adds no prompt
+  friction — `rtk grep` always dispatches to the system `grep`, which has no exec
+  primitive.
+- `rg` is **not** rewritten. `rtk` forwards ripgrep's `--pre <cmd>`, which executes an
+  arbitrary binary, so `Bash(rtk rg:*)` can never be auto-approved; rewriting `rg`
+  without approving it would only stop your own `Bash(rg:*)` rule from matching and
+  add a prompt to every search. `rg` behaves exactly as before.
+- A standalone `-h`/`--help` now suppresses the rewrite. `rtk`'s own argument parser
+  claims those before they reach the underlying tool, so `grep -h pat a b` (and
+  `ls -h`, `wc -h`, `diff -h`, `git -h …`) printed `rtk` usage and exited 0 — a silent
+  empty result. Bundled forms (`-lh`, `-rh`, `-nh`) are unaffected.
+- `head -N` is no longer rewritten. `rtk read --max-lines N` is not a `head`
+  equivalent: it renders about half the requested lines (`head -1` returned none), so
+  the model silently received a smaller window than it asked for.
 - Preserve `npm run` script semantics and stop substituting tools for project
   scripts, package-manager runners, and explicit Python/uv invocations.
 - Retire broad `rtk find` and `rtk git branch` approvals on upgrade: these commands
-  can execute/delete files or mutate branches. Added hook-protocol, real-RTK, and
-  permission-migration regressions; CI pins RTK 0.49.0 and verifies its checksum.
+  can execute/delete files or mutate branches. Retirement now also applies when the
+  addition contributing a permission array is **deselected** — previously the profiles
+  that turned `rtk-safe` off were the only ones that kept `Bash(rtk find:*)`.
+- Added hook-protocol, real-RTK equivalence, and permission-migration regressions;
+  CI pins RTK 0.49.0 and verifies its checksum.
 
 ## [0.4.1] plugin distribution + a dead permission-rule fix
 
