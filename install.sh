@@ -931,17 +931,6 @@ apply_additions() {
     # push, …) keep prompting. Deliberately NOT a blanket Bash(rtk:*) — rtk
     # fronts curl/aws/psql/docker, so that would amount to a general Bash allow.
     add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/rtk-allowlist.json")"
-    # `Bash(rtk rg:*)` is the one allow rule that is NOT safe on its own: ripgrep's
-    # --pre/--hostname-bin run an arbitrary binary and RIPGREP_CONFIG_PATH injects flags
-    # from a file, and a prefix rule approves every suffix. command-guard blocks all three
-    # (detectSearchExec), which is what makes the approval safe — so without command-guard
-    # selected, drop just that rule. rg is still REWRITTEN (the token saving is kept); it
-    # simply prompts, exactly as it would have with no approval. Degrading the rule beats
-    # aborting the install over a token-saver, and beats shipping an unbacked exec approval.
-    if ! is_selected command-guard "$_sel_ids"; then
-      add="$(jq '(.permissions.allow) |= (if type=="array" then map(select(. != "Bash(rtk rg:*)")) else . end)' <<<"$add")"
-      warn "rtk rg auto-approval withheld: it requires command-guard (which blocks ripgrep's --pre/--hostname-bin/RIPGREP_CONFIG_PATH exec vectors). rg is still compressed; it will prompt."
-    fi
     command -v rtk >/dev/null 2>&1 || warn "RTK rewriting registered but inert until 'rtk' is installed."
   fi
   if is_selected statusline "$_sel_ids"; then
@@ -1201,6 +1190,32 @@ apply_additions() {
   # version's set), without ever touching rules they added themselves.
   reconcile_managed_perms "$existing" "$add"
   existing="$RECON_EXISTING"; add="$RECON_ADD"
+
+  # ── rtk rg ⟷ command-guard coupling (enforced on BOTH sides of the merge) ──
+  # `Bash(rtk rg:*)` is the one allow rule that is not safe standalone: ripgrep's
+  # --pre/--hostname-bin execute an arbitrary binary and RIPGREP_CONFIG_PATH injects flags
+  # from a file, and a PREFIX rule approves every suffix. command-guard's detectSearchExec
+  # is what makes it safe, so the two must never be separated.
+  #
+  # Filtering only the incoming `add` was not enough: merge_settings UNIONS, command-guard
+  # contributes no permissions payload for prune_addition_from_settings to strip, and the
+  # rule is not in .retired[] (it is current, not retired), so an upgrade that DESELECTED
+  # command-guard left a live approval with no guard behind it — the one state the design
+  # says must never ship. Strip it from the EXISTING profile too, every run, whenever the
+  # guard is not selected. rg is still REWRITTEN (the token saving is kept); it just
+  # prompts, exactly as with no approval.
+  if ! is_selected command-guard "$_sel_ids"; then
+    local _rgrule='Bash(rtk rg:*)' _had_rg=0
+    jq -e --arg r "$_rgrule" '((.permissions.allow // []) | index($r)) != null' <<<"$existing" >/dev/null 2>&1 && _had_rg=1
+    local _strip='(.permissions.allow) |= (if type=="array" then map(select(. != $r)) else . end)'
+    existing="$(jq -c --arg r "$_rgrule" "$_strip" <<<"$existing")"
+    add="$(jq -c --arg r "$_rgrule" "$_strip" <<<"$add")"
+    if [ "$_had_rg" = "1" ]; then
+      warn "Removed the existing 'Bash(rtk rg:*)' approval: it requires command-guard, which is not selected. rg stays compressed; it will prompt."
+    else
+      warn "rtk rg auto-approval withheld: it requires command-guard (which blocks ripgrep's --pre/--hostname-bin/RIPGREP_CONFIG_PATH exec vectors). rg is still compressed; it will prompt."
+    fi
+  fi
   # Write when there's something to write OR a settings.json already exists — the
   # latter so deselecting the LAST settings-contributing addition (merge result
   # back to {}) actually persists; otherwise the empty merge is skipped and the

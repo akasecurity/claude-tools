@@ -70,4 +70,24 @@ for pair in "with:$S_WITH" "without:$S_NO"; do
     "$(jq '[.hooks.PreToolUse[]?.hooks[]?.command | select(test("rtk-safe\\.ts"))] | length' "$f")"
 done
 
+# ── (d) THE UPGRADE PATH: the approval must not outlive the guard ─────────────
+# Filtering only the incoming payload was not enough. merge_settings UNIONS, command-guard
+# contributes no permissions payload to prune, and the rule is current (not retired), so
+# re-running with command-guard DESELECTED used to leave a live approval with no guard
+# behind it. Reuse the profile from (a), which already holds the approval.
+run_into "$SB_WITH" "secure-settings rtk-safe"
+assert_eq "upgrade (deselecting command-guard) exits 0" "0" "$?"
+assert_ok "settings valid JSON after deselect-upgrade" jq -e . "$S_WITH"
+assert_eq "Bash(rtk rg:*) REMOVED when command-guard is deselected on upgrade" "null" \
+  "$(jq '(.permissions.allow // []) | index("Bash(rtk rg:*)")' "$S_WITH")"
+assert_eq "command-guard hook unregistered on deselect" "0" \
+  "$(jq '[.hooks.PreToolUse[]?.hooks[]?.command | select(test("command-guard"))] | length' "$S_WITH")"
+# The removal is surgical and the compression survives.
+assert_ok "Bash(rtk grep:*) survives the deselect-upgrade" jq -e \
+  '(.permissions.allow // []) | index("Bash(rtk grep:*)") != null' "$S_WITH"
+assert_eq "rtk-safe hook still registered after deselect-upgrade" "1" \
+  "$(jq '[.hooks.PreToolUse[]?.hooks[]?.command | select(test("rtk-safe\\.ts"))] | length' "$S_WITH")"
+assert_ok "removal is explained to the user" \
+  grep -q "Removed the existing 'Bash(rtk rg:\*)' approval" "$SB_WITH/log"
+
 t_summary
