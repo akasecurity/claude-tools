@@ -420,5 +420,71 @@
     "tool": "Bash",
     "text": "rtk git log --pretty=oneline",
     "expect": "allow"
+  },
+  {
+    "desc": "rg exec via export in the same call",
+    "tool": "Bash",
+    "text": "export RIPGREP_CONFIG_PATH=/tmp/evil.rc; rtk rg needle .",
+    "expect": "block"
+  },
+  {
+    "desc": "rg exec via declare -x",
+    "tool": "Bash",
+    "text": "declare -x RIPGREP_CONFIG_PATH=/tmp/evil.rc",
+    "expect": "block"
+  },
+  {
+    "desc": "rg exec via env prefix",
+    "tool": "Bash",
+    "text": "env RIPGREP_CONFIG_PATH=/tmp/evil.rc rtk rg needle .",
+    "expect": "block"
+  },
+  {
+    "desc": "rg --pre behind env wrapper",
+    "tool": "Bash",
+    "text": "env rg --pre /tmp/payload.sh needle .",
+    "expect": "block"
+  },
+  {
+    "desc": "rg --pre behind command wrapper",
+    "tool": "Bash",
+    "text": "command rg --pre /tmp/payload.sh needle .",
+    "expect": "block"
+  },
+  {
+    "desc": "rg --pre behind rtk pre-subcommand option",
+    "tool": "Bash",
+    "text": "rtk -v rg --pre /tmp/payload.sh needle .",
+    "expect": "block"
+  },
+  {
+    "desc": "rg --pre inside a brace group",
+    "tool": "Bash",
+    "text": "{ rtk rg --pre /tmp/payload.sh needle .; }",
+    "expect": "block"
+  },
+  {
+    "desc": "rg --pre quoted (raw-fallback superset)",
+    "tool": "Bash",
+    "text": "rtk rg '--pre' /tmp/payload.sh needle .",
+    "expect": "block"
+  },
+  {
+    "desc": "benign search behind env with an unrelated assignment",
+    "tool": "Bash",
+    "text": "env FOO=bar rg -n needle src",
+    "expect": "allow"
+  },
+  {
+    "desc": "benign export then search",
+    "tool": "Bash",
+    "text": "export FOO=bar; rtk rg needle .",
+    "expect": "allow"
+  },
+  {
+    "desc": "benign search behind nice",
+    "tool": "Bash",
+    "text": "nice rg -n needle src",
+    "expect": "allow"
   }
 ]
