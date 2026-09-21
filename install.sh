@@ -931,6 +931,17 @@ apply_additions() {
     # push, …) keep prompting. Deliberately NOT a blanket Bash(rtk:*) — rtk
     # fronts curl/aws/psql/docker, so that would amount to a general Bash allow.
     add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/rtk-allowlist.json")"
+    # `Bash(rtk rg:*)` is the one allow rule that is NOT safe on its own: ripgrep's
+    # --pre/--hostname-bin run an arbitrary binary and RIPGREP_CONFIG_PATH injects flags
+    # from a file, and a prefix rule approves every suffix. command-guard blocks all three
+    # (detectSearchExec), which is what makes the approval safe — so without command-guard
+    # selected, drop just that rule. rg is still REWRITTEN (the token saving is kept); it
+    # simply prompts, exactly as it would have with no approval. Degrading the rule beats
+    # aborting the install over a token-saver, and beats shipping an unbacked exec approval.
+    if ! is_selected command-guard "$_sel_ids"; then
+      add="$(jq '(.permissions.allow) |= (if type=="array" then map(select(. != "Bash(rtk rg:*)")) else . end)' <<<"$add")"
+      warn "rtk rg auto-approval withheld: it requires command-guard (which blocks ripgrep's --pre/--hostname-bin/RIPGREP_CONFIG_PATH exec vectors). rg is still compressed; it will prompt."
+    fi
     command -v rtk >/dev/null 2>&1 || warn "RTK rewriting registered but inert until 'rtk' is installed."
   fi
   if is_selected statusline "$_sel_ids"; then

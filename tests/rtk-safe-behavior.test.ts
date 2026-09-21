@@ -78,11 +78,7 @@ try {
   // These literal dangerous commands must not match a shipped prefix approval.
   // This tests our policy, not Claude Code's permission matcher implementation.
   const allow: string[] = JSON.parse(readFileSync(resolve(import.meta.dir, '../config/rtk-allowlist.json'), 'utf8')).permissions.allow;
-  for (const command of ['rtk find . -delete', 'rtk find . -exec sh payload.sh ;', 'rtk git branch -D topic', 'rtk git branch -m renamed',
-    // ripgrep's --pre runs an arbitrary binary and rtk forwards it, so `Bash(rtk rg:*)`
-    // would be silent code execution. `rtk grep` IS approved — it dispatches to the
-    // system grep, which has no exec primitive (asserted against the real binary below).
-    'rtk rg --pre /tmp/payload.sh needle .']) {
+  for (const command of ['rtk find . -delete', 'rtk find . -exec sh payload.sh ;', 'rtk git branch -D topic', 'rtk git branch -m renamed']) {
     check(`no kit prefix approval for ${command}`, () => {
       assert.equal(allow.some(rule => {
         const prefix = rule.match(/^Bash\((.*):\*\)$/)?.[1];
@@ -105,6 +101,10 @@ try {
       ['grep -q needle input.txt', '', 0],
       ['grep missing input.txt', '', 1],
       ["grep 'needle+' input.txt", '', 1], // BRE: + is literal
+      ['rg -n needle input.txt', '1:needle\n3:needle two\n', 0],
+      ['rg -v needle input.txt', 'other\n', 0],
+      ['rg missing input.txt', '', 1],
+      ["rg 'needle+' input.txt", 'needle\nneedle two\n', 0], // regex quantifier
     ] as const) {
       check(`real RTK preserves search contract: ${command}`, () => {
         const r = shell(command); assert.equal(r.status, status, r.stderr); assert.equal(r.stdout, stdout);
@@ -163,13 +163,32 @@ try {
       assert.notEqual(r.status, 0, 'expected grep to reject --pre, not run it');
       assert.equal(existsSync(marker), false, 'rtk grep executed a preprocessor binary');
     });
-    check('rtk rg DOES exec --pre (why rg is neither approved nor rewritten)', () => {
+    // rg is auto-approved, and ripgrep DOES have an exec primitive — so the approval is
+    // only safe while command-guard refuses the exec flags. Assert the pair together:
+    // the vector is real, and the guard blocks it. If rtk/ripgrep ever stops exec'ing
+    // --pre the first assert fails and the coupling can be revisited deliberately.
+    check('rtk rg execs --pre, and command-guard blocks it (the pairing)', () => {
       const marker = join(sb, 'rg-pre-ran');
       preScript(marker);
       raw('rtk rg --pre ./pre.sh needle input.txt');
       assert.equal(existsSync(marker), true,
-        'rtk rg no longer executes --pre — re-evaluate whether rg can be rewritten/approved');
-      assert.equal(rewrite('rg needle input.txt'), null, 'rg must not be rewritten');
+        'rtk rg no longer executes --pre — re-evaluate the command-guard coupling');
+
+      const guard = resolve(import.meta.dir, '../config/hooks/command-guard.ts');
+      const ask = (command: string) => spawnSync(process.execPath, [guard], {
+        cwd: sb, env, encoding: 'utf8', timeout: 5000,
+        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
+      }).status;
+      for (const blocked of [
+        'rtk rg --pre ./pre.sh needle .',
+        'rtk rg --pre=./pre.sh needle .',
+        'rtk rg --hostname-bin ./pre.sh needle .',
+        'RIPGREP_CONFIG_PATH=./rc rtk rg needle .',
+      ]) assert.equal(ask(blocked), 2, `command-guard must block: ${blocked}`);
+      // …without blocking the searches the approval exists to make frictionless.
+      for (const allowed of ['rtk rg -n needle .', 'rtk rg -n -- --pre .', 'rtk grep -n needle input.txt']) {
+        assert.equal(ask(allowed), 0, `command-guard must allow: ${allowed}`);
+      }
     });
     check('npm lifecycle-named scripts remain scripts, not package operations', () => {
       // Capture npm argv without allowing any real package operation/network.

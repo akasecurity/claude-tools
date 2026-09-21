@@ -23,7 +23,7 @@
  *   - the command carries a standalone `-h`/`--help` (see HELP_FLAG);
  *   - no rule matches.
  *
- * Credential safety: a `cat`/`grep` whose LITERAL text names a credential-bearing
+ * Credential safety: a `cat`/`grep`/`rg` whose LITERAL text names a credential-bearing
  * path is left UNREWRITTEN, so it stays a reader Claude Code recognizes and the
  * secure-settings Read(...) deny still binds (rewriting to `rtk read` — an unrecognized
  * reader — would slip it past that deny). This is a best-effort guard on the obvious,
@@ -162,19 +162,17 @@ const RULES: Rule[] = [
   // file. Re-enable only if rtk grows a true head-N mode, and pin it with a real-RTK
   // equivalence check in rtk-safe-behavior.test.ts before shipping.
 
-  // grep — RTK >= 0.49 preserves native -n/-v and dispatches to the system grep. Keep
-  // credential reads raw, and never compress a pipe's intermediate data (below).
+  // grep/rg — RTK >= 0.49 preserves native -n/-v and the selected engine. Keep credential
+  // reads raw, and never compress a pipe's intermediate data (below). rg is the single
+  // highest-value rewrite after `rtk read` (~19x grep's saving per call in the `rtk gain`
+  // sample), which is why it carries its own approval rather than being skipped.
   //
-  // `rg` is deliberately NOT rewritten, even though rtk compresses it well. rtk forwards
-  // ripgrep's flags verbatim, including `--pre <cmd>`, which EXECUTES an arbitrary binary
-  // — so `Bash(rtk rg:*)` can never be added to rtk-allowlist.json (a prefix rule approves
-  // every suffix). Rewriting rg without approving it is all cost and no benefit: the
-  // user's own `Bash(rg:*)` stops matching and every search starts prompting, for a
-  // token saving they may well disable the addition to avoid. Left alone, rg behaves
-  // exactly as it did before this hook existed. grep has no such exec primitive, so it
-  // gets both the rewrite and the approval. Re-evaluate only if rtk grows a way to run
-  // rg with the exec flags refused.
-  (b) => (withArgs(b, 'grep') && !CRED_PATH.test(b) ? front(b) : null),
+  // Both are auto-approved in rtk-allowlist.json. `rtk grep` is safe by construction — it
+  // dispatches to the system grep, which has no exec primitive. `rtk rg` is NOT: ripgrep's
+  // `--pre`/`--hostname-bin` run an arbitrary binary and RIPGREP_CONFIG_PATH injects flags
+  // from a file. Those three are blocked by command-guard (detectSearchExec), and that
+  // block is what makes the approval safe. Do not approve rg in a profile without it.
+  (b) => ((withArgs(b, 'grep') || withArgs(b, 'rg')) && !CRED_PATH.test(b) ? front(b) : null),
   (b) => (startsWithWord(leadWord(b), 'ls') ? front(b) : null),
   (b) => (startsWithWord(leadWord(b), 'tree') ? front(b) : null),
   (b) => (withArgs(b, 'find') ? front(b) : null),

@@ -163,13 +163,14 @@ for (const command of [
 eq('grep -n needle file.txt', 'rtk grep -n needle file.txt');
 eq('grep -v needle file.txt', 'rtk grep -v needle file.txt');
 eq('grep needle ~/.ssh/id_rsa', null);
-// rg is never rewritten: rtk forwards ripgrep's `--pre <cmd>` (arbitrary exec), so
-// `Bash(rtk rg:*)` can't be allowlisted, and an unapprovable rewrite is pure prompt
-// friction. Leaving rg alone also keeps the user's own Bash(rg:*) rule matching.
-eq('rg -n needle src', null);
-eq('rg --json needle src', null);
+// rg IS rewritten (highest-value rewrite after `rtk read`). `Bash(rtk rg:*)` is safe only
+// because command-guard blocks ripgrep's exec flags — see tests/corpus.json. rtk-safe is a
+// token-saver, not a gate, so it still rewrites the exec forms; the guard is what stops
+// them. Asserted here so the division of labour stays explicit.
+eq('rg -n needle src', 'rtk rg -n needle src');
+eq('rg --json needle src', 'rtk rg --json needle src');
 eq('rg needle project/.env', null);
-eq('rg --pre ./x.sh needle .', null);
+eq('rg --pre ./x.sh needle .', 'rtk rg --pre ./x.sh needle .');
 
 // A standalone -h/--help is claimed by rtk's own parser before it reaches the underlying
 // tool, which would print rtk usage and exit 0 — an empty result that reads as "no match".
