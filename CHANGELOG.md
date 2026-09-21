@@ -12,8 +12,11 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 - `command-guard` blocks ripgrep's arbitrary-execution vectors: `--pre`,
   `--hostname-bin`, and `RIPGREP_CONFIG_PATH` (which points `rg` at a file of flags,
   injecting `--pre` without either flag appearing in the command text). All three are
-  confirmed live. Ordinary searches are unaffected, including `rg -- --pre` and
-  `--preview`. `--search-zip` is intentionally not blocked — it spawns only rg's
+  confirmed live. The detector resolves the effective command first, so the vectors are
+  caught behind `env`/`command`/`nice`/`nohup` wrappers, behind `export`/`declare -x`
+  in the same call, behind rtk's own pre-subcommand options (`rtk -v rg …`), and inside
+  brace groups. Ordinary searches are unaffected, including `rg -- --pre`, `--preview`
+  and `--pretty=`. `--search-zip` is intentionally not blocked — it spawns only rg's
   built-in decompressors, so the caller chooses no binary.
 
 ### Fixed
@@ -22,6 +25,11 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   or unresponsive binaries leave commands unchanged. Shell operators, substitutions,
   and command-local `PATH` overrides are skipped so compressed output cannot corrupt
   pipelines or files. Both forms are auto-approved so this adds no prompt friction.
+  Long result sets are summarised rather than returned whole: roughly the first 25
+  matches, plus an exact count of what was hidden and a `rtk recall` handle for the
+  remainder. That is deliberate and is the difference from the `head -N` rule removed
+  below — the count is accurate and the rest is retrievable, where `rtk read --max-lines`
+  silently rendered about half the requested window.
 - A standalone `-h`/`--help` now suppresses the rewrite. `rtk`'s own argument parser
   claims those before they reach the underlying tool, so `grep -h pat a b` (and
   `ls -h`, `wc -h`, `diff -h`, `git -h …`) printed `rtk` usage and exited 0 — a silent
@@ -35,8 +43,11 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   rewriting doesn't cost a prompt on the most frequent command class. `rtk grep` is
   safe standalone (it dispatches to the system `grep`, which cannot exec or write).
   `Bash(rtk rg:*)` is safe **only because command-guard blocks ripgrep's exec flags**,
-  so the two ship together: selecting `rtk-safe` without `command-guard` keeps the
-  `rg` compression but withholds that one approval, and says so.
+  so the two are coupled in both directions: a fresh install without `command-guard`
+  withholds that one approval, and an upgrade that **deselects** `command-guard` now
+  removes an approval already in the profile rather than leaving it live with nothing
+  behind it. Either way the `rg` compression is kept — it just prompts — and the
+  installer says which happened.
 - Retire broad `rtk find` and `rtk git branch` approvals on upgrade: these commands
   can execute/delete files or mutate branches. Retirement now also applies when the
   addition contributing a permission array is **deselected** — previously the profiles
