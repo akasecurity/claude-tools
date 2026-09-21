@@ -167,6 +167,14 @@ const RULES: Rule[] = [
   // highest-value rewrite after `rtk read` (~19x grep's saving per call in the `rtk gain`
   // sample), which is why it carries its own approval rather than being skipped.
   //
+  // These DO elide long result sets (~25 matches shown, remainder summarised) — that is
+  // the point of the rewrite. It is not the same defect that got `head -N` removed: the
+  // elision states an EXACT hidden count (shown + hidden == the native match total) and
+  // offers a `rtk recall` handle, so the caller knows what it did not see and can get it.
+  // `rtk read --max-lines N` instead silently renders ~N/2 lines while still claiming to
+  // honour N. Pinned by 'search elision is accurate and recoverable' in
+  // rtk-safe-behavior.test.ts — if a count ever goes wrong, these rules must be re-argued.
+  //
   // Both are auto-approved in rtk-allowlist.json. `rtk grep` is safe by construction — it
   // dispatches to the system grep, which has no exec primitive. `rtk rg` is NOT: ripgrep's
   // `--pre`/`--hostname-bin` run an arbitrary binary and RIPGREP_CONFIG_PATH injects flags

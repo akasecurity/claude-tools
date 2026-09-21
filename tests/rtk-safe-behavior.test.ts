@@ -139,6 +139,33 @@ try {
     };
 
     check('real RTK: cat of a whole file is byte-identical', () => rewriteMatchesNative('cat input.txt'));
+
+    // Result elision on the search rules, pinned at a size that actually triggers it.
+    // The 3-line fixture above structurally cannot: rtk shows the first ~25 matches and
+    // summarises the rest, so every equivalence assertion on a small file is vacuous.
+    //
+    // This is the line between the search rules (kept) and `head -N` (removed), and it is
+    // NOT "elision is fine". rtk grep/rg elide with an ACCURATE count and a recall handle
+    // — shown + hidden equals the native match total exactly, and the remainder is
+    // retrievable. `rtk read --max-lines N` instead silently reinterprets N (asked 10,
+    // renders 5), so the caller cannot tell it got a smaller window than it requested.
+    // If rtk ever makes a search count inaccurate, that distinction collapses and the
+    // grep/rg rules have to be re-argued — this test is what would catch it.
+    check('real RTK: search elision is accurate and recoverable, not silent', () => {
+      const nativeTotal = Number(raw('grep -c line big.txt').stdout.trim());
+      assert.ok(nativeTotal > 40, `fixture must exceed rtk's display cap, got ${nativeTotal}`);
+      const rewritten = rewrite('grep -n line big.txt');
+      assert.notEqual(rewritten, null);
+      const out = raw(rewritten!).stdout;
+
+      const shown = (out.match(/^\d+:line /gm) ?? []).length;
+      const hidden = Number(out.match(/\+(\d+) hidden/)?.[1] ?? NaN);
+      assert.ok(shown > 0 && shown < nativeTotal, `expected partial display, got ${shown}/${nativeTotal}`);
+      assert.ok(Number.isFinite(hidden), 'elided output must state how many matches are hidden');
+      assert.equal(shown + hidden, nativeTotal,
+        `elision count must be exact: ${shown} shown + ${hidden} hidden != ${nativeTotal} native`);
+      assert.match(out, /rtk recall [0-9a-f]+/, 'elided matches must be recoverable');
+    });
     for (const n of [1, 2, 20]) {
       check(`head -${n} skipped, and rtk read --max-lines ${n} really does diverge`, () =>
         skippedForGoodReason(`head -${n} big.txt`, `rtk read big.txt --max-lines ${n}`));
