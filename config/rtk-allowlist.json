@@ -1,13 +1,16 @@
 {
   "$comment": [
     "Maintainer notes — stripped from the merged settings.json by install.sh; never shipped to a user's config.",
-    "These auto-approve selected rtk display forms so common reads do not add prompt friction. No broad find or git branch approval: find accepts -exec/-delete and branch accepts deletion/rename. Search rewrites also remain subject to normal permissions. Mutating/outbound forms (rtk curl/aws/psql/docker, rtk git push, rtk git fetch) are deliberately NOT here and still prompt.",
+    "These auto-approve selected rtk display forms so common reads do not add prompt friction. No broad find or git branch approval: find accepts -exec/-delete and branch accepts deletion/rename. Mutating/outbound forms (rtk curl/aws/psql/docker, rtk git push, rtk git fetch) are deliberately NOT here and still prompt.",
+    "On `rtk grep` vs `rtk rg` — the criterion is whether the UNDERLYING tool has an exec primitive, since these are prefix rules that approve every suffix. `rtk grep` always dispatches to the system grep (verified on 0.49.0: rg-only --glob and GNU-only -P both bounce off BSD grep, and --pre is rejected rather than run), and grep can neither exec nor write, so `Bash(rtk grep:*)` is the same risk class as the `Bash(rtk read:*)` already here. `rtk rg` forwards ripgrep's `--pre <cmd>`, which EXECUTES an arbitrary binary (verified live) — so `Bash(rtk rg:*)` would be silent arbitrary code execution, the same reason `Bash(rtk find:*)` was retired. Because it can never be approved, rtk-safe does not rewrite `rg` at all: rewriting it would only break the user's own `Bash(rg:*)` rule and add a prompt to every search. Re-verify the grep dispatch before bumping the rtk floor.",
+    "Note for users: rtk truncates long search output and stashes the remainder in its platform data directory (verified on macOS: ~/Library/Application Support/rtk/recall.db, mode 0600), retrievable later via `rtk recall <id>`. So matched lines outlive the session on disk. rtk-safe refuses to rewrite a grep/rg whose literal text names a credential path (see CRED_PATH in rtk-safe.ts), which keeps the obvious case out of that store.",
     "On `rtk read`: kept here even though it can read arbitrary files. The secure-settings Read(...) deny only binds to readers Claude Code recognizes (cat/head/tail/sed), so unrecognized readers (xxd/base64/od/python -c, and rtk read) bypass it regardless — gating rtk read would cost the highest-volume read path (~31% of rtk's token savings per `rtk gain`) for ~zero security gain. The credential case that actually occurs (the model typing `cat <credpath>`) is handled upstream by rtk-safe.ts, which refuses to rewrite cat/head of credential paths so they stay as `cat` and stay denied."
   ],
   "permissions": {
     "allow": [
       "Bash(rtk diff:*)",
       "Bash(rtk git diff:*)",
+      "Bash(rtk grep:*)",
       "Bash(rtk git log:*)",
       "Bash(rtk git show:*)",
       "Bash(rtk git stash list:*)",
