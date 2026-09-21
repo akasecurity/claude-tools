@@ -1,14 +1,12 @@
 {
   "$comment": [
     "Maintainer notes — stripped from the merged settings.json by install.sh; never shipped to a user's config.",
-    "These auto-approve the strictly read-only rtk forms so the cat/git/ls/find -> rtk rewrite doesn't add prompt friction. Mutating/outbound forms (rtk curl/aws/psql/docker, rtk git push, rtk git fetch) are deliberately NOT here and still prompt.",
+    "These auto-approve selected rtk display forms so common reads do not add prompt friction. No broad find or git branch approval: find accepts -exec/-delete and branch accepts deletion/rename. Search rewrites also remain subject to normal permissions. Mutating/outbound forms (rtk curl/aws/psql/docker, rtk git push, rtk git fetch) are deliberately NOT here and still prompt.",
     "On `rtk read`: kept here even though it can read arbitrary files. The secure-settings Read(...) deny only binds to readers Claude Code recognizes (cat/head/tail/sed), so unrecognized readers (xxd/base64/od/python -c, and rtk read) bypass it regardless — gating rtk read would cost the highest-volume read path (~31% of rtk's token savings per `rtk gain`) for ~zero security gain. The credential case that actually occurs (the model typing `cat <credpath>`) is handled upstream by rtk-safe.ts, which refuses to rewrite cat/head of credential paths so they stay as `cat` and stay denied."
   ],
   "permissions": {
     "allow": [
       "Bash(rtk diff:*)",
-      "Bash(rtk find:*)",
-      "Bash(rtk git branch:*)",
       "Bash(rtk git diff:*)",
       "Bash(rtk git log:*)",
       "Bash(rtk git show:*)",

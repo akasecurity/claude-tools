@@ -110,7 +110,7 @@ Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.
 | `secure-settings` | Denies reads of SSH keys, cloud creds, `.env`, keychains; blocks writes to shell startup files; no auto-loaded MCP servers. | ● on |
 | `leak-guard` | Scans what the agent sends to the web and blocks anything shaped like a secret. Scanned locally, nothing uploaded to check it. | ● on |
 | `command-guard` | Blocks `curl…\|bash`, edits to your shell startup files, and credentials being shipped out. | ● on |
-| `rtk-safe` | Rewrites chatty command output into compact summaries before it reaches the model (~75% fewer routed tokens in a 90-day sample). Inert until [`rtk`](https://github.com/rtk-ai/rtk) is installed. | ● on |
+| `rtk-safe` | Compresses supported standalone commands, including `grep`/`rg`. Requires stable [`rtk`](https://github.com/rtk-ai/rtk) ≥ 0.49.0; otherwise leaves commands unchanged. Skips shell operators/substitutions and preserves project scripts and interpreter selection. | ● on |
 | `statusline` | A status bar with live context-fill and rate-limit gauges. | ● on |
 | `shell-audit` | On-demand, read-only scan of your shell startup for hardcoded creds, risky hooks, and stale aliases. | ● on |
 | `wrap-up` | A `/wrap-up` command that summarizes, verifies, and stages a commit for review. Never commits on its own. | ○ opt-in |

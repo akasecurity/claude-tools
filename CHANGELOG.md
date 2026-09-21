@@ -8,6 +8,17 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+### Fixed
+- `rtk-safe` restores standalone `grep`/`rg` rewriting with their original engine
+  on stable RTK >= 0.49.0. Older, missing, prerelease, or unresponsive binaries
+  leave commands unchanged. Shell operators, substitutions, and command-local
+  `PATH` overrides are skipped so compressed output cannot corrupt pipelines or files.
+- Preserve `npm run` script semantics and stop substituting tools for project
+  scripts, package-manager runners, and explicit Python/uv invocations.
+- Retire broad `rtk find` and `rtk git branch` approvals on upgrade: these commands
+  can execute/delete files or mutate branches. Added hook-protocol, real-RTK, and
+  permission-migration regressions; CI pins RTK 0.49.0 and verifies its checksum.
+
 ## [0.4.1] plugin distribution + a dead permission-rule fix
 
 ### Added

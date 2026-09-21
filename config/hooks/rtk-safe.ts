@@ -11,31 +11,31 @@
  * Design: a single ordered rule table (RULES). Each rule inspects the leading command and
  * returns the rewritten command body or null ("not mine"); the first non-null wins. Most
  * rules just front the command with `rtk` (optionally gated to a safe subcommand set); a
- * few normalize a form (head -N → rtk read --max-lines N, npm run X → rtk npm X, the test
- * runners → rtk vitest run). Leading `NAME=val` env assignments are split off for matching
+ * few normalize a form (head -N → rtk read --max-lines N, cat → rtk read).
+ * Simple unquoted `NAME=val` env assignments are split off for matching
  * and re-attached verbatim to the rewrite.
  *
  * Self-skip (exit 0, no rewrite) when:
  *   - the tool is not Bash, or the command is empty;
- *   - `rtk` is not on PATH (the hook is inert until the user installs rtk);
- *   - the command already invokes rtk, contains a heredoc (<<), or spans multiple lines
- *     (the rule set assumes single-line semantics — a multi-line body would mis-rewrite);
+ *   - `rtk` is absent, older than 0.49.0, a prerelease, or cannot report its version;
+ *   - the command already invokes rtk or contains shell operators, substitutions,
+ *     escapes, comments, or multiple lines (even quoted operators conservatively skip);
  *   - no rule matches.
  *
- * Credential safety: a `cat`/`head` whose LITERAL command text names a credential-bearing
+ * Credential safety: a `cat`/`head`/`grep`/`rg` whose LITERAL text names a credential-bearing
  * path is left UNREWRITTEN, so it stays a reader Claude Code recognizes and the
  * secure-settings Read(...) deny still binds (rewriting to `rtk read` — an unrecognized
  * reader — would slip it past that deny). This is a best-effort guard on the obvious,
  * accidental case (the model typing `cat ~/.ssh/id_rsa`), matching the prior hook's
- * behavior and command-guard's threat model; it scans only the raw string, so it does NOT
- * see a credential path reached via a variable, symlink, or command substitution — those
- * are out of scope here (a determined exfil is command-guard's surface, not a token-saver's).
+ * behavior and command-guard's threat model; it scans only the raw string, so symlink
+ * targets are not resolved. Variables/substitutions are skipped conservatively.
  * Keep CRED_PATH in sync with settings.base.json's denied read paths.
  *
  * Requires: bun (registered as `<bun> <dir>/rtk-safe.ts`). Unlike the old bash version it
  * cannot degrade-run without bun; the installer makes bun a hard dependency of this addition.
  */
 import { readFileSync } from 'fs';
+import { spawnSync } from 'child_process';
 
 interface HookInput {
   tool_name?: string;
@@ -43,9 +43,16 @@ interface HookInput {
 }
 
 // Leading `NAME=val ` assignment(s) — split off before matching, re-attached to the rewrite.
-const ENV_PREFIX = /^([A-Za-z_]\w*=\S* +)+/;
+const ENV_PREFIX = /^([A-Za-z_]\w*=[A-Za-z0-9_./:@%+,=~-]* +)+/;
 // Command already routed through rtk (bare `rtk …` or a path `…/rtk …`).
 const ALREADY_RTK = /^(\S*\/)?rtk\s/;
+
+// Compatibility floor, tested against the real binary. Unknown/prerelease builds
+// fail open to the original command rather than enabling unverified rewrites.
+export function supportedVersion(version: string): boolean {
+  const m = version.trim().match(/^rtk (\d+)\.(\d+)\.(\d+)$/);
+  return !!m && (Number(m[1]) > 0 || Number(m[2]) >= 49);
+}
 
 // Credential-bearing read targets — a cat/head of one of these must NOT be rewritten (see
 // the header note). Mirrors the secure-settings denied read set; functional, not creative.
@@ -129,6 +136,8 @@ const RULES: Rule[] = [
   (b) => {
     if (!withArgs(b, 'cat')) return null;
     if (CRED_PATH.test(b)) return null;
+    // Only plain file operands: cat's flags/stdin are not rtk read's interface.
+    if (/(?:^|\s)["']?-/.test(b.slice(4))) return null;
     return 'rtk read ' + b.slice('cat'.length).trimStart();
   },
   (b) => {
@@ -137,52 +146,46 @@ const RULES: Rule[] = [
     // head -N file / head --lines=N file → rtk read file --max-lines N
     const m = b.match(/^head\s+(?:-(\d+)|--lines=(\d+))\s+(.+)$/);
     if (m) {
+      if (/(?:^|\s)["']?-/.test(m[3])) return null;
       const n = m[1] ?? m[2];
       return `rtk read ${m[3]} --max-lines ${n}`;
     }
     return null;
   },
-  // rg/grep are deliberately NOT rewritten — see issue #37 for the full benchmark.
-  // Short: rtk grep 0.42.4 silently inverts -v (its own -v = verbosity, not grep's invert)
-  // and its "N matches in 0 files" path returns empty output for the fleet's most common
-  // shape (grep -n). Re-evaluate only after rtk fixes the empty-display bug AND stops
-  // shadowing -v; re-run the flag-distribution benchmark before re-enabling.
+  // RTK >= 0.49 preserves native -n/-v and the selected search engine. Keep
+  // credential reads raw, and never compress a pipe's intermediate data (below).
+  (b) => ((withArgs(b, 'grep') || withArgs(b, 'rg')) && !CRED_PATH.test(b) ? front(b) : null),
   (b) => (startsWithWord(leadWord(b), 'ls') ? front(b) : null),
   (b) => (startsWithWord(leadWord(b), 'tree') ? front(b) : null),
   (b) => (withArgs(b, 'find') ? front(b) : null),
   (b) => (withArgs(b, 'diff') ? front(b) : null),
 
-  // JS/TS — normalize the test/type/lint runners onto their rtk forms.
+  // Explicit runners only. Never replace pnpm scripts, npx resolution, vue-tsc,
+  // python -m, or uv with a different tool/interpreter. Bare vitest keeps watch mode.
   (b) => {
-    const m = b.match(/^(?:pnpm\s+)?(?:npx\s+)?vitest(?:\s+run)?(\s.*|$)/);
+    const m = b.match(/^vitest\s+run(\s.*|$)/);
     return m ? 'rtk vitest run' + m[1] : null;
   },
-  (b) => (startsWithWord(b, 'pnpm test') ? 'rtk vitest run' + b.slice('pnpm test'.length) : null),
   (b) => (startsWithWord(b, 'npm test') ? 'rtk npm test' + b.slice('npm test'.length) : null),
   (b) => {
     const m = b.match(/^npm\s+run\s+(.+)$/);
-    return m ? 'rtk npm ' + m[1] : null;
+    // Keep `run`: dropping it turns scripts named install/publish into npm operations.
+    return m ? front(b) : null;
   },
   (b) => {
-    const m = b.match(/^(?:npx\s+)?vue-tsc(\s.*|$)/);
+    const m = b.match(/^tsc(\s.*|$)/);
     return m ? 'rtk tsc' + m[1] : null;
   },
-  (b) => (startsWithWord(b, 'pnpm tsc') ? 'rtk tsc' + b.slice('pnpm tsc'.length) : null),
   (b) => {
-    const m = b.match(/^(?:npx\s+)?tsc(\s.*|$)/);
-    return m ? 'rtk tsc' + m[1] : null;
-  },
-  (b) => (startsWithWord(b, 'pnpm lint') ? 'rtk lint' + b.slice('pnpm lint'.length) : null),
-  (b) => {
-    const m = b.match(/^(?:npx\s+)?eslint(\s.*|$)/);
+    const m = b.match(/^eslint(\s.*|$)/);
     return m ? 'rtk lint' + m[1] : null;
   },
   (b) => {
-    const m = b.match(/^(?:npx\s+)?prettier(\s.*|$)/);
+    const m = b.match(/^prettier(\s.*|$)/);
     return m ? 'rtk prettier' + m[1] : null;
   },
   (b) => {
-    const m = b.match(/^(?:npx\s+)?prisma(\s.*|$)/);
+    const m = b.match(/^prisma(\s.*|$)/);
     return m ? 'rtk prisma' + m[1] : null;
   },
 
@@ -220,7 +223,6 @@ const RULES: Rule[] = [
 
   // python tooling.
   (b) => (startsWithWord(leadWord(b), 'pytest') ? front(b) : null),
-  (b) => (startsWithWord(b, 'python -m pytest') ? 'rtk pytest' + b.slice('python -m pytest'.length) : null),
   (b) => {
     const sub = subcommand(b, 'ruff');
     return startsWithWord(leadWord(b), 'ruff') && ['check', 'format'].includes(sub) ? front(b) : null;
@@ -231,13 +233,7 @@ const RULES: Rule[] = [
       ? front(b)
       : null;
   },
-  (b) => {
-    if (!/^uv\s+pip($|\s)/.test(b)) return null;
-    const sub = b.replace(/^uv\s+pip\s*/, '').split(/\s+/, 1)[0] ?? '';
-    return ['list', 'outdated', 'install', 'show'].includes(sub) ? 'rtk pip ' + b.replace(/^uv\s+pip\s*/, '') : null;
-  },
   (b) => (startsWithWord(leadWord(b), 'mypy') ? front(b) : null),
-  (b) => (startsWithWord(b, 'python -m mypy') ? 'rtk mypy' + b.slice('python -m mypy'.length) : null),
 
   // go tooling.
   (b) => {
@@ -254,8 +250,14 @@ const RULES: Rule[] = [
 
 /** Compute the rewritten command (incl. env prefix), or null if nothing applies. */
 export function rewrite(command: string): string | null {
-  if (ALREADY_RTK.test(command) || command.includes('<<') || command.includes('\n')) return null;
+  // Deliberately conservative, not a shell parser. Even quoted metacharacters
+  // are skipped. Compression belongs at the display boundary, never before a
+  // pipe/redirection, and options must not migrate across command boundaries.
+  if (ALREADY_RTK.test(command) || /[|&;<>`$(){}\\\n\r#]/.test(command)) return null;
   const prefix = command.match(ENV_PREFIX)?.[0] ?? '';
+  // The runtime version probe uses the hook's PATH. Do not rewrite onto a
+  // different, unverified RTK selected by a command-local PATH assignment.
+  if (/(^| )PATH=/.test(prefix)) return null;
   const body = command.slice(prefix.length);
   for (const rule of RULES) {
     const out = rule(body);
@@ -286,6 +288,11 @@ function main(): void {
 
   const rewritten = rewrite(command);
   if (rewritten === null || rewritten === command) process.exit(0);
+
+  const version = spawnSync('rtk', ['--version'], {
+    encoding: 'utf-8', timeout: 1000, maxBuffer: 4096,
+  });
+  if (version.error || version.status !== 0 || !supportedVersion(version.stdout)) process.exit(0);
 
   // Preserve all original tool_input fields; change only `command`. No permissionDecision:
   // the rewritten command is re-evaluated by the normal allow/deny/ask flow (returning

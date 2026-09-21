@@ -11,7 +11,10 @@
       "Read(~/.gcloud/**)",
       "Read(~/.npm/**)"
     ],
-    "allow": [],
+    "allow": [
+      "Bash(rtk find:*)",
+      "Bash(rtk git branch:*)"
+    ],
     "ask": []
   },
   "retiredAdditions": [

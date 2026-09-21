@@ -7,4 +7,4 @@ SB="$(mktemp -d "${TMPDIR:-/tmp}/aka-rtk-unit.XXXXXX")"
 trap 'rm -rf "$SB"' EXIT
 export HOME="$SB" TMPDIR="$SB"
 unset CLAUDE_CONFIG_DIR XDG_RUNTIME_DIR
-exec bun "$(dirname "${BASH_SOURCE[0]}")/rtk-safe.test.ts"
+bun "$(dirname "${BASH_SOURCE[0]}")/rtk-safe.test.ts"

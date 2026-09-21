@@ -12,7 +12,7 @@ assert_ok "rtk-allowlist.json valid JSON" jq -e . "$AL"
 
 # (1) the allow set is EXACTLY the strictly read-only rtk forms — any addition fails here.
 EXPECTED="$(printf '%s\n' \
-  'Bash(rtk diff:*)' 'Bash(rtk find:*)' 'Bash(rtk git branch:*)' 'Bash(rtk git diff:*)' \
+  'Bash(rtk diff:*)' 'Bash(rtk git diff:*)' \
   'Bash(rtk git log:*)' 'Bash(rtk git show:*)' 'Bash(rtk git stash list:*)' \
   'Bash(rtk git stash show:*)' 'Bash(rtk git status:*)' 'Bash(rtk ls:*)' \
   'Bash(rtk read:*)' 'Bash(rtk wc:*)' | sort)"

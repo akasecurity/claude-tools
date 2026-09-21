@@ -76,22 +76,23 @@ eq('diff', null);
 
 // ── JS/TS runners ─────────────────────────────────────────────────────────────
 eq('npm test', 'rtk npm test');
-eq('npm run build', 'rtk npm build');
+eq('npm run build', 'rtk npm run build');
+eq('npm run install -- --dry-run', 'rtk npm run install -- --dry-run');
 eq('npm run', null);                 // no script name
-eq('pnpm test', 'rtk vitest run');
-eq('vitest', 'rtk vitest run');
+eq('pnpm test', null); // project scripts need not use vitest
+eq('vitest', null); // preserve watch mode
 eq('vitest run src', 'rtk vitest run src');
-eq('npx vitest', 'rtk vitest run');
-eq('pnpm vitest run --coverage', 'rtk vitest run --coverage');
+eq('npx vitest', null);
+eq('pnpm vitest run --coverage', null); // preserve package-manager resolution
 eq('tsc', 'rtk tsc');
-eq('npx tsc --noEmit', 'rtk tsc --noEmit');
-eq('npx vue-tsc', 'rtk tsc');
-eq('pnpm tsc', 'rtk tsc');
+eq('npx tsc --noEmit', null);
+eq('npx vue-tsc', null);
+eq('pnpm tsc', null);
 eq('eslint .', 'rtk lint .');
-eq('npx eslint src', 'rtk lint src');
-eq('pnpm lint', 'rtk lint');
+eq('npx eslint src', null);
+eq('pnpm lint', null);
 eq('prettier --check .', 'rtk prettier --check .');
-eq('npx prisma generate', 'rtk prisma generate');
+eq('npx prisma generate', null);
 eq('pnpm list', 'rtk pnpm list');
 eq('pnpm outdated', 'rtk pnpm outdated');
 eq('pnpm install', null);            // install not in the query set
@@ -114,14 +115,14 @@ eq('wget https://example.com/f', 'rtk wget https://example.com/f');
 // ── python / go / misc ────────────────────────────────────────────────────────
 eq('pytest -q', 'rtk pytest -q');
 eq('pytest', 'rtk pytest');
-eq('python -m pytest tests/', 'rtk pytest tests/');
-eq('python -m mypy .', 'rtk mypy .');
+eq('python -m pytest tests/', null); // keep the selected interpreter
+eq('python -m mypy .', null);
 eq('mypy src', 'rtk mypy src');
 eq('ruff check .', 'rtk ruff check .');
 eq('ruff format', 'rtk ruff format');
 eq('pip install requests', 'rtk pip install requests');
 eq('pip uninstall x', null);
-eq('uv pip list', 'rtk pip list');
+eq('uv pip list', null);
 eq('go test ./...', 'rtk go test ./...');
 eq('go build', 'rtk go build');
 eq('go run main.go', null);          // run not in the set
@@ -141,6 +142,28 @@ eq('cat <<EOF\nhi\nEOF', null);      // heredoc (also multiline)
 eq('git status\ngit log', null);     // multiline
 eq('echo hello', null);              // not in any rule
 eq('', null);                        // empty
+
+// Shell operators must not move options onto another command or feed compressed
+// output to a program. Conservative skips also cover operators inside quotes.
+for (const command of [
+  'head -5 README.md | wc -l', 'head -5 README.md && echo done',
+  'cat README.md > copy.md', 'cat README.md | python parse.py',
+  'git status; echo done', 'git status || echo failed', 'git status &',
+  'cat $(echo README.md)', 'cat `echo README.md`', 'cat "$FILE"',
+  'cat <(echo hello)', 'cat README.md # comment', 'cat a\\ b',
+  'cat -s README.md', 'cat -', 'cat --help',
+  'FOO="two words" git status',
+  'FOO="x cat file"', 'head -5 -v file.txt',
+  'PATH=/old/bin:/usr/bin grep -v needle file.txt',
+  'FOO=bar PATH=/old/bin rg needle file.txt',
+]) eq(command, null);
+
+eq('grep -n needle file.txt', 'rtk grep -n needle file.txt');
+eq('grep -v needle file.txt', 'rtk grep -v needle file.txt');
+eq('rg -n needle src', 'rtk rg -n needle src');
+eq('rg --json needle src', 'rtk rg --json needle src');
+eq('grep needle ~/.ssh/id_rsa', null);
+eq('rg needle project/.env', null);
 
 console.log(`\nrtk-safe.test: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
