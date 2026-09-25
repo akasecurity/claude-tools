@@ -741,13 +741,23 @@ setup_alias() {
 # command-guard would block a pipe-to-shell bootstrap anyway), so an accept prints
 # the commands to run. Under --defaults the confirm takes its default (yes) without
 # blocking. Silent when ai-tc is already present, so a re-run does not nag.
+# aitc_present [config_dir] — ai-tc installed AND enabled, per guard-core's detectAitc
+# (one detection rule shared by the installer here and the hooks' run-time deferral,
+# Tasks 4-6). With a config dir, checks that one profile (used by the statusline
+# skip and the stash guard, which must agree on the SAME profile being installed).
+# Without one, checks the default profile and every ~/.claude-* profile (used by
+# offer_aitc, which is a global "don't nag" check, not tied to one target dir).
+# Fails safe: no bun, or the core unreadable, counts as absent — a detection outage
+# must never block the install or silently swallow the kit's own statusline/offer.
 aitc_present() {
-  # Best-effort: skip the offer when ai-tc is already installed in the default
-  # profile or any kit profile. Marketplace plugins land under <config>/plugins.
-  local d
-  for d in "$HOME"/.claude/plugins "$HOME"/.claude-*/plugins; do
+  local core="$CONFIG_SRC/hooks/lib/guard-core.js" d
+  command -v bun >/dev/null 2>&1 || return 1
+  if [ -n "${1:-}" ]; then
+    [ "$(bun "$REPO_DIR/shared/lib/aitc-status.ts" "$core" "$1" 2>/dev/null)" = present ]; return
+  fi
+  for d in "$HOME/.claude" "$HOME"/.claude-*; do
     [ -d "$d" ] || continue
-    find "$d" -maxdepth 3 -iname '*ai-tc*' -print -quit 2>/dev/null | grep -q . && return 0
+    [ "$(bun "$REPO_DIR/shared/lib/aitc-status.ts" "$core" "$d" 2>/dev/null)" = present ] && return 0
   done
   return 1
 }
@@ -1107,7 +1117,13 @@ apply_additions() {
     add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/rtk-allowlist.json")"
     command -v rtk >/dev/null 2>&1 || warn "RTK rewriting registered but inert until 'rtk' is installed."
   fi
-  if is_selected statusline "$_sel_ids"; then
+  if is_selected statusline "$_sel_ids" && aitc_present "$config_dir"; then
+    # ai-tc provides its own statusline (coexistencePolicy().statusline is false when
+    # present) — installing the kit's on top would fight it for the slot. The stash
+    # guard below (4d-pre1d) mirrors this same aitc_present check, so a pre-existing
+    # user statusLine is neither stashed nor pruned when we skip here.
+    ok "ai-tc detected; skipping the kit status line (ai-tc provides its own)"
+  elif is_selected statusline "$_sel_ids"; then
     # bun is guaranteed present here — the hard-dependency gate above aborts the install
     # if statusline is selected without bun (the .ts can't degrade-run like the old .sh).
     local bun_bin; bun_bin="$(command -v bun)"
@@ -1266,7 +1282,13 @@ apply_additions() {
   # flipped the registration to $HOME (which would wrongly stash it as _aka_prior).
   local _slstem;   _slstem="$(cfg_token "$config_dir")/${_slrel%.*}"
   local _sllegacy; _sllegacy="$(shq "$config_dir")/${_slrel%.*}"
-  if is_selected statusline "$_sel_ids" && [ "$existing" != "{}" ]; then
+  # Skip the stash entirely when ai-tc is present for this profile: the build step
+  # above (4b) never wrote a kit statusLine into $add in that case, so $e * $a leaves
+  # the user's existing .statusLine exactly as-is — stashing it here would plant a
+  # spurious _aka_prior_statusLine even though nothing was overwritten. Same
+  # aitc_present("$config_dir") check as the write-skip above, so the two branches
+  # can't disagree about whether the kit is claiming the statusLine slot.
+  if is_selected statusline "$_sel_ids" && ! aitc_present "$config_dir" && [ "$existing" != "{}" ]; then
     if printf '%s' "$existing" | jq -e --arg stem "$_slstem" --arg legacy "$_sllegacy" '
           (.statusLine|type)=="object"
           and ((.statusLine.command) as $c

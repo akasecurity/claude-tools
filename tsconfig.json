@@ -1,5 +1,5 @@
 {
-  "$comment": "Typecheck-only config for the bun-runtime hooks (command-guard.ts, statusline.ts, rtk-safe.ts). CI runs `tsc --noEmit` against it; bun runs the files directly, so nothing is emitted.",
+  "$comment": "Typecheck-only config for the bun-runtime hooks (command-guard.ts, statusline.ts, rtk-safe.ts) and the shared/lib/*.ts installer helpers (aitc-status.ts). CI runs `tsc --noEmit` against it; bun runs the files directly, so nothing is emitted.",
   "compilerOptions": {
     "strict": true,
     "noEmit": true,
@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["config/hooks/*.ts", "tests/*.test.ts"]
+  "include": ["config/hooks/*.ts", "shared/lib/*.ts", "tests/*.test.ts"]
 }
