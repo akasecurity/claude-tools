@@ -1,0 +1,194 @@
+[
+  {
+    "id": "cg-pipe-shell",
+    "exit": 2,
+    "stderr": "[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): piping output into a shell interpreter (curl … | bash). Download, inspect, then run.\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-startup",
+    "exit": 2,
+    "stderr": "[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): writing to a shell startup file (~/.zshrc, ~/.bashrc, …) is a persistence vector. Your dotfiles are Edit/Write-denied; a Bash redirection bypasses that. If intentional, run it in your own shell (e.g. a `! <cmd>` prompt); for a profile alias use `./install.sh --alias`.\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-rg-pre",
+    "exit": 2,
+    "stderr": "[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): ripgrep's --pre / --hostname-bin run an arbitrary binary, and RIPGREP_CONFIG_PATH injects flags from a file. `rtk rg` is auto-approved for token savings, so these are blocked here. Search without them, or run it in your own shell (e.g. a `! <cmd>` prompt).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-cred",
+    "exit": 2,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): credential exfiltration — AWS access key id sent via an outbound tool.\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-patterns-missing-outbound",
+    "exit": 2,
+    "stderr": "[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): secret-patterns.json is missing or corrupt, so the egress scan can't run — blocking this outbound command as a precaution. Restore config/hooks/lib/secret-patterns.json or reinstall.\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-patterns-missing-local",
+    "exit": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "id": "cg-org-hit",
+    "exit": 2,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): outbound command matches an internal identifier from aka-claude-tools.config (hostname, IP, path, or username). Describe it generically instead.\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-org-stale",
+    "exit": 2,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n[aka-claude-tools SECURITY] ⚠️ command-guard: aka-claude-tools.config changed since install — any CT_EGRESS_PATTERNS edit is NOT active yet. Re-run ./install.sh to recompile the org-marker tier.\n[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): outbound command matches an internal identifier from aka-claude-tools.config (hostname, IP, path, or username). Describe it generically instead.\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-alert-post",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): curl HTTP upload (POST / --data) (allowed).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-alert-wget",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): wget HTTP upload (--post-*) (allowed).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-alert-nc",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): netcat / ncat connection (allowed).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-alert-socat",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): socat relay (allowed).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-alert-sendmail",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): sendmail invocation (allowed).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-alert-env",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): bare environment dump (allowed).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-alert-set",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): bare shell-variable dump (allowed).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-alert-python",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): inline python execution (-c) (allowed).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-alert-node",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): inline interpreter execution (-e) (allowed).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-deep-nesting",
+    "exit": 2,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: command too complex to parse precisely — falling back to strict structural checks (may over-block).\n[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): piping output into a shell interpreter (curl … | bash). Download, inspect, then run.\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-bad-json",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: could not parse hook input — allowed. If this recurs, the hook may be misconfigured.\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-allow",
+    "exit": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "id": "cg-trufflehog-missing",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): curl HTTP upload (POST / --data) (allowed).\n",
+    "stdout": ""
+  },
+  {
+    "id": "lg-cred",
+    "exit": 2,
+    "stderr": "warn (leak-guard): trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\negress blocked (leak-guard): query contains a token or key value.\n",
+    "stdout": ""
+  },
+  {
+    "id": "lg-allow",
+    "exit": 0,
+    "stderr": "warn (leak-guard): trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n",
+    "stdout": ""
+  },
+  {
+    "id": "lg-patterns-missing",
+    "exit": 2,
+    "stderr": "egress blocked (leak-guard): secret-patterns.json is missing or unreadable, so the egress scan can't run — blocking this query as a precaution. Restore config/hooks/lib/secret-patterns.json or reinstall.\n",
+    "stdout": ""
+  },
+  {
+    "id": "lg-org-hit",
+    "exit": 2,
+    "stderr": "warn (leak-guard): trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\negress blocked (leak-guard): query matches an internal identifier from aka-claude-tools.config (hostname, IP, path, or username). Describe it generically instead.\n",
+    "stdout": ""
+  },
+  {
+    "id": "lg-org-stale",
+    "exit": 2,
+    "stderr": "warn (leak-guard): trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\nwarn (leak-guard): aka-claude-tools.config changed since install but its org-egress patterns were not recompiled — the org-marker tier is using STALE patterns. Re-run ./install.sh to recompile. (Web egress is still scanned with the last-compiled patterns.)\negress blocked (leak-guard): query matches an internal identifier from aka-claude-tools.config (hostname, IP, path, or username). Describe it generically instead.\n",
+    "stdout": ""
+  },
+  {
+    "id": "lg-org-invalid",
+    "exit": 0,
+    "stderr": "warn (leak-guard): trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\nwarn (leak-guard): the compiled org-marker pattern isn't a valid regex — org-marker tier skipped (not silently allowed). Re-run ./install.sh.\n",
+    "stdout": ""
+  },
+  {
+    "id": "lg-not-web",
+    "exit": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "id": "lg-trufflehog-missing",
+    "exit": 0,
+    "stderr": "warn (leak-guard): trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n",
+    "stdout": ""
+  },
+  {
+    "id": "lg-bad-json",
+    "exit": 0,
+    "stderr": "warn (leak-guard): could not parse hook input — egress scan SKIPPED this call. If this recurs, the hook may be misconfigured.\n",
+    "stdout": ""
+  },
+  {
+    "id": "rs-git-status",
+    "exit": 0,
+    "stderr": "",
+    "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"updatedInput\":{\"command\":\"rtk git status\"}}}"
+  },
+  {
+    "id": "rs-pipe",
+    "exit": 0,
+    "stderr": "",
+    "stdout": ""
+  }
+]
