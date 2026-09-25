@@ -64,7 +64,11 @@ aka-claude-tools
 The npm package brings its own `bun` as a dependency, so command-guard/leak-guard/statusline/rtk-safe
 work even with no system `bun` on PATH. If npm's install-script policy blocks it (e.g. `npm i -g`
 under npm 12's script restrictions prints a warning and skips it), the installer falls back to its
-normal interactive bun offer.
+normal interactive bun offer. **If your hooks ended up registered with that bundled bun** (the
+installer warns you when this happens), run this kit's uninstall before removing or upgrading the
+`@akasecurity/claude-tools` package, or install a system `bun` and re-run the installer first —
+otherwise `npm uninstall -g` / `npm update -g` can leave the hooks pointing at a path that no longer
+exists.
 
 **Or clone and run:**
 
@@ -146,6 +150,7 @@ and other shells can exec it too — and with the AI Traffic Control CLI install
 - **Pick per profile.** Choose pieces from the menu, or set `CT_ADDITIONS` to the ids you want for a scripted run.
 - **Upgrade in place.** As the kit updates, re-run. It finds the kit-managed profiles and **layers the current additions in place**: retired rules reconciled, renamed hooks re-registered, your own settings left intact.
 - **Remove cleanly.** Drop one piece by re-running without it (deselecting uninstalls it). Don't like any of it? Delete the profile. Your real setup never changed.
+- **Installed via npm and the hooks are wired to its bundled `bun`?** (The installer warns at apply time when this is the case.) Run this kit's uninstall *before* `npm uninstall -g` / `npm update -g` moves or removes that binary — otherwise the hooks point at a missing path, exit silently (127), and stop guarding without telling you.
 
 <p align="center"><img src="media/isolated-profile.svg" alt="A config dir is a whole Claude Code in a folder: try the kit in a fresh ~/.claude-aka or harden your real ~/.claude, and run several profiles side by side, each its own launcher." width="100%"></p>
 

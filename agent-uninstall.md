@@ -20,6 +20,14 @@ to `./uninstall.sh`**, which carries the safety guards. Never hand-roll the
 
 Work through the steps below. **Confirm before executing, and verify after.**
 
+> If `aka-claude-tools` was installed via **npm** and the profile's hooks are
+> registered with that package's bundled `bun` (the installer's apply-time warning
+> says so, and it is baked into the `command`/`statusLine.command` paths in
+> `settings.json`), run this profile removal **before** `npm uninstall -g` or
+> `npm update -g @akasecurity/claude-tools` — otherwise the hooks are left pointing
+> at a `bun` binary that no longer exists and silently stop guarding (exit 127,
+> which Claude Code does not treat as a block).
+
 ---
 
 ## 1. Identify the target profile

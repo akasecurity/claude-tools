@@ -23,6 +23,9 @@
 #      command-guard with the bundled bun's absolute path as the first token of the
 #      hook command — proving the PATH-prepend in bin/aka-claude-tools actually wires
 #      install.sh's `command -v bun` to the bundled binary end to end.
+#   D. That same --apply run prints a ONE-TIME warning that the hooks are wired to
+#      the npm-bundled bun (which breaks if the package is later removed/moved), and
+#      a second --apply with a SYSTEM bun on PATH prints no such warning.
 #
 # Never touches the real global npm prefix: npm installs go into "$tmp/prefix" via
 # --prefix, and a --userconfig npmrc scoped to the temp dir (never ~/.npmrc) carries
@@ -41,6 +44,10 @@ command -v jq  >/dev/null 2>&1 || { echo "SKIP: jq not installed";  exit 0; }
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+
+# Captured before the hermetic no-bun PATH below is built, so the "system bun present"
+# negative case (D) can put a REAL bun back on PATH alongside the same hermetic tools.
+sys_bun="$(command -v bun 2>/dev/null || true)"
 
 # ── hermetic no-bun PATH ──────────────────────────────────────────────────────
 # Symlink-farm approach (matches tests/lib.sh's install_path()), NOT a PATH-dir
@@ -87,7 +94,9 @@ if ! HOME="$home" PATH="$nobun_bin" npm install -g --userconfig "$npmrc" \
 fi
 
 pkg="$tmp/prefix/lib/node_modules/@akasecurity/claude-tools"
-bunbin="$(ls "$pkg"/node_modules/.bin/bun 2>/dev/null || true)"
+bunbin=""
+_bunbin_probe="$pkg/node_modules/.bin/bun"
+[ -x "$_bunbin_probe" ] && bunbin="$_bunbin_probe"
 if [ -z "$bunbin" ] || [ ! -x "$bunbin" ]; then
   echo "SKIP: bundled bun did not land at node_modules/.bin/bun (script-policy or platform-optional-dep failure)"
   tail -20 "$install_log"
@@ -145,6 +154,49 @@ else
   echo "  expected: $bunbin"
   echo "  got cmd:  $cmd"
   exit 1
+fi
+
+# ── D: one-time warning when the hooks are wired to the BUNDLED bun ───────────
+warn_needle='hooks will run on the bun bundled with this npm package'
+if grep -qF "$warn_needle" "$apply_log"; then
+  echo "  PASS: --apply (no system bun) warns hooks use the npm-bundled bun"
+else
+  echo "FAIL: --apply with no system bun did not print the bundled-bun warning"
+  cat "$apply_log"
+  exit 1
+fi
+# Once per run, not once per hook: exactly one occurrence even though this --apply
+# only selected one hook-bearing addition (command-guard); the gate that prints it
+# runs once per apply_additions call regardless of how many of the four bun-backed
+# additions are selected.
+occurrences="$(grep -oF "$warn_needle" "$apply_log" | wc -l | tr -d ' ')"
+if [ "$occurrences" = "1" ]; then
+  echo "  PASS: bundled-bun warning printed exactly once"
+else
+  echo "FAIL: expected the bundled-bun warning exactly once, got $occurrences"
+  exit 1
+fi
+
+# ── D negative: no warning when a SYSTEM bun is on PATH ───────────────────────
+if [ -z "$sys_bun" ]; then
+  echo "  SKIP: no system bun available on this host to exercise the negative case"
+else
+  sysbun_path="$(dirname "$sys_bun"):$nobun_bin"
+  apply_dir2="$tmp/ctconfig-sysbun"
+  apply_home2="$tmp/agent-home-sysbun"; mkdir -p "$apply_home2"
+  apply_log2="$tmp/apply-sysbun.log"
+  if ! CT_CONFIG_DIR="$apply_dir2" CT_ADDITIONS="command-guard" HOME="$apply_home2" PATH="$sysbun_path" \
+        bash "$pkg/bin/aka-claude-tools" --apply --no-auth-inherit >"$apply_log2" 2>&1; then
+    echo "FAIL: bin/aka-claude-tools --apply exited non-zero with a system bun on PATH"
+    cat "$apply_log2"
+    exit 1
+  fi
+  if grep -qF "$warn_needle" "$apply_log2"; then
+    echo "FAIL: --apply warned about the bundled bun even though a system bun was used"
+    cat "$apply_log2"
+    exit 1
+  fi
+  echo "  PASS: --apply with a system bun on PATH prints no bundled-bun warning"
 fi
 
 echo PASS

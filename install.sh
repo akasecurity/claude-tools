@@ -1022,6 +1022,18 @@ apply_additions() {
   if is_selected command-guard "$_sel_ids" || is_selected leak-guard "$_sel_ids" \
      || is_selected statusline "$_sel_ids" || is_selected rtk-safe "$_sel_ids"; then
     ensure_dep bun "bun — required runtime for command-guard, leak-guard, statusline, and/or rtk-safe" 1
+    # Warn ONCE per run (not once per hook below) when the bun about to be baked into
+    # every selected hook's absolute path is the one npm installed alongside THIS
+    # package (its own node_modules, or the hoisted ../../.bin one level up), not a
+    # system bun. That absolute path stops resolving the moment the npm package is
+    # removed or moved (`npm uninstall -g` / `npm update -g`): the hook then exits 127,
+    # which Claude Code treats as "hook errored", not "guard blocked" — command-guard
+    # silently stops guarding rather than failing loudly. See uninstall.sh docs.
+    local _bun_bin; _bun_bin="$(command -v bun)"
+    case "$_bun_bin" in
+      "$REPO_DIR"/node_modules/*|"$REPO_DIR"/../../.bin/*)
+        warn "hooks will run on the bun bundled with this npm package ($_bun_bin), not a system bun. Before removing or moving @akasecurity/claude-tools, run this kit's uninstall first — or install a system bun and re-run the installer — otherwise the hooks silently stop guarding." ;;
+    esac
   fi
 
   # ── build ──
