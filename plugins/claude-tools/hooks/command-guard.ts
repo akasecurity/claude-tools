@@ -19,8 +19,10 @@
  * Protocol: deny → exit 2 (Claude Code blocks); alert/allow → exit 0.
  *
  * FAIL STATES:
- *   - guard-core missing/unloadable → block outbound-looking commands, allow the rest
- *     with a loud notice.
+ *   - guard-core missing, unloadable, incompatible (missing exports) or throwing →
+ *     conservative raw-regex structural blocks still apply, outbound-looking commands
+ *     are blocked, and the rest is allowed with a loud notice.
+ *   - A block decision always exits 2, even for a rule this adapter has no message for.
  *   - Shared patterns file missing/corrupt → the core fails closed on outbound commands.
  *   - Org sidecar missing / unparseable / malformed → org tier inactive, never a crash.
  *   - Unparseable stdin → fail open, but loudly (stderr).
@@ -32,16 +34,24 @@ import { createHash } from 'crypto';
 import { dirname, join } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
-import type { OrgTier } from './lib/guard-core.js';
+import type { OrgTier, RuleId } from './lib/guard-core.js';
 
 const P = '[aka-claude-tools SECURITY] ';
 // Used only when guard-core itself cannot load, to find the outbound subset to fail closed on.
 const FALLBACK_OUTBOUND = /\b(curl|wget|nc|ncat|socat|fetch)\b/i;
+// Conservative raw-string structural checks, used only when guard-core cannot load or is
+// incompatible. They over-block (any pipe into an interpreter, any write-ish verb on a line
+// naming a startup dotfile, any rg exec marker even when quoted) so a missing core degrades
+// to "too strict", never to an allow. The \s+ after each \S+ keeps the env-wrapper skip linear.
+const PIPE_TO_SHELL_RAW = /\|&?\s*(?:(?:\S*\/)?env\s+(?:\S+\s+)*)?(?:\S*\/)?(?:sh|bash|zsh)\b/i;
+const STARTUP_WRITE_RAW = /(?:>|\btee\b|\bsed\b|\bcp\b|\bmv\b|\binstall\b|\bln\b|\bdd\b)[^\n]*\.(?:zshrc|zshenv|zprofile|bashrc|bash_profile|profile)\b/;
+const SEARCH_EXEC_RAW = /(?:^|[\s'"])--(?:pre|hostname-bin)(?![\w-])|RIPGREP_CONFIG_PATH=/;
+const CORE_MISSING_NOTICE = '⚠️ command-guard: the guard-core library is missing, unreadable or incompatible — only conservative fallback checks ran. Reinstall to restore config/hooks/lib/guard-core.js.';
 
 interface HookInput { tool_name?: string; tool_input?: Record<string, unknown> | string }
 
 // Messages are the kit's public contract; tests/golden pins them. Keys are guard-core RuleIds.
-const BLOCK_MSG: Record<string, (detail?: string) => string> = {
+const BLOCK_MSG: Record<RuleId, (detail?: string) => string> = {
   'pipe-to-shell': () => '🚨 BLOCKED (command-guard): piping output into a shell interpreter (curl … | bash). Download, inspect, then run.',
   'startup-write': () => '🚨 BLOCKED (command-guard): writing to a shell startup file (~/.zshrc, ~/.bashrc, …) is a persistence vector. Your dotfiles are Edit/Write-denied; a Bash redirection bypasses that. If intentional, run it in your own shell (e.g. a `! <cmd>` prompt); for a profile alias use `./install.sh --alias`.',
   'search-exec': () => '🚨 BLOCKED (command-guard): ripgrep\'s --pre / --hostname-bin run an arbitrary binary, and RIPGREP_CONFIG_PATH injects flags from a file. `rtk rg` is auto-approved for token savings, so these are blocked here. Search without them, or run it in your own shell (e.g. a `! <cmd>` prompt).',
@@ -106,6 +116,25 @@ function profileRoots(): string[] {
   return [join(homedir(), '.claude')];
 }
 
+// guard-core missing, unreadable, incompatible or throwing: keep the structural blocks via
+// the raw regexes, fail closed on outbound-looking commands, allow the rest loudly.
+function coreUnavailable(command: string): never {
+  const rule: RuleId | null = PIPE_TO_SHELL_RAW.test(command) ? 'pipe-to-shell'
+    : STARTUP_WRITE_RAW.test(command) ? 'startup-write'
+    : SEARCH_EXEC_RAW.test(command) ? 'search-exec' : null;
+  if (rule) {
+    console.error(P + CORE_MISSING_NOTICE);
+    console.error(P + BLOCK_MSG[rule]());
+    process.exit(2);
+  }
+  if (FALLBACK_OUTBOUND.test(command)) {
+    console.error(P + '🚨 BLOCKED (command-guard): the guard-core library is missing or unreadable, so the egress scan can\'t run — blocking this outbound command as a precaution. Reinstall to restore config/hooks/lib/guard-core.js.');
+    process.exit(2);
+  }
+  console.error(P + CORE_MISSING_NOTICE);
+  process.exit(0);
+}
+
 async function main(): Promise<void> {
   let input: HookInput | null | undefined;
   try { input = readInput(); } catch {
@@ -122,28 +151,42 @@ async function main(): Promise<void> {
     ? input.tool_input : (input.tool_input?.command as string | undefined) ?? '';
   if (!command) process.exit(0);
 
-  let core: typeof import('./lib/guard-core.js');
-  try { core = await import('./lib/guard-core.js'); } catch {
-    if (FALLBACK_OUTBOUND.test(command)) {
-      console.error(P + '🚨 BLOCKED (command-guard): the guard-core library is missing or unreadable, so the egress scan can\'t run — blocking this outbound command as a precaution. Reinstall to restore config/hooks/lib/guard-core.js.');
-      process.exit(2);
+  type Core = typeof import('./lib/guard-core.js');
+  let core: Core;
+  try {
+    core = await import('./lib/guard-core.js');
+    for (const fn of ['evaluateBash', 'detectAitc', 'coexistencePolicy', 'parsePatterns'] as const) {
+      if (typeof core[fn] !== 'function') throw new Error(`guard-core export ${fn} missing`);
     }
-    console.error(P + '⚠️ command-guard: the guard-core library is missing or unreadable — structural checks skipped for this command. Reinstall to restore it.');
-    process.exit(0);
+  } catch {
+    coreUnavailable(command);
   }
 
-  const policy = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots() }));
-  const d = core.evaluateBash(command, {
-    patterns: core.parsePatterns(loadPatternsRaw()),
-    org: loadOrgTier(),
-    scanSecrets: policy.scanSecrets('Bash'),
-  });
+  // ai-tc detection only ever turns scanning off; if it throws, scan (the safe direction).
+  let scanSecrets = true;
+  try {
+    scanSecrets = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots() }))
+      .scanSecrets('Bash') !== false;
+  } catch { scanSecrets = true; }
+
+  let d: ReturnType<Core['evaluateBash']>;
+  try {
+    d = core.evaluateBash(command, {
+      patterns: core.parsePatterns(loadPatternsRaw()),
+      org: loadOrgTier(),
+      scanSecrets,
+    });
+    if (!d || !Array.isArray(d.notices)) throw new Error('malformed guard-core decision');
+  } catch {
+    coreUnavailable(command);
+  }
   for (const n of d.notices) {
     const line = NOTICE_MSG[n.code]?.(n.message);
     if (line) console.error(P + line);
   }
   if (d.kind === 'block') {
-    console.error(P + BLOCK_MSG[d.rule](d.detail));
+    const msg = BLOCK_MSG[d.rule] as ((detail?: string) => string) | undefined;
+    console.error(P + (msg ? msg(d.detail) : `🚨 BLOCKED (command-guard): ${d.reason}`));
     process.exit(2);
   }
   process.exit(0);
