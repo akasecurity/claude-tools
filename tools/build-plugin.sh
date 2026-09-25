@@ -14,7 +14,8 @@ jq -n --arg v "$(cat VERSION)" '{
   description:"AKA Claude Tools guard hooks (command-guard, leak-guard) for your active profile. Requires bun; guards fail OPEN (never block) and announce themselves inactive at session start if bun is missing. For the full hardened ISOLATED profile (credential-read denies, rtk-safe permission allowlist, status line, alias), install the full kit — see the project README for npm, Homebrew, and installer options."
 }' > "$OUT/.claude-plugin/plugin.json"
 
-# copy launcher + preflight + shared lib (secret-patterns.json only, for defense-in-depth)
+# copy launcher + preflight + shared lib (secret-patterns.json for defense-in-depth,
+# plus the vendored guard-core every bundled guard hook runs on)
 install -m 0755 config/hooks/bun-hook-launch.sh config/hooks/preflight.sh "$HK"/
 mkdir -p "$HK/lib" && cp config/hooks/lib/secret-patterns.json config/hooks/lib/guard-core.js "$HK/lib/"
 
