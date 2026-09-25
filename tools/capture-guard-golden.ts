@@ -4,7 +4,13 @@ import { chmodSync, cpSync, mkdtempSync, readdirSync, rmSync, symlinkSync, write
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-type Case = { id: string; hook: string; input?: unknown; raw?: string; env?: string; org?: Record<string, string> };
+type Case = {
+  id: string; hook: string; input?: unknown; raw?: string; env?: string; org?: Record<string, string>;
+  // Optional: for a case whose stderr embeds something incidental (e.g. a JS engine's
+  // own TypeError text on an unexpected-error path) rather than a message this repo
+  // owns, pin only a fixed prefix instead of the exact line. See --check below.
+  stderrPrefix?: string;
+};
 const root = join(import.meta.dir, '..');
 const cases: Case[] = JSON.parse(readFileSync(join(root, 'tests/golden/guard-cases.json'), 'utf-8'));
 
@@ -91,7 +97,10 @@ const out = cases.map((c) => {
     },
   });
   cleanup();
-  return { id: c.id, exit: r.exitCode, stderr: r.stderr.toString(), stdout: r.stdout.toString() };
+  return {
+    id: c.id, exit: r.exitCode, stderr: r.stderr.toString(), stdout: r.stdout.toString(),
+    ...(c.stderrPrefix !== undefined ? { stderrPrefix: c.stderrPrefix } : {}),
+  };
 });
 
 for (const shadow of shadowDirs) rmSync(shadow, { recursive: true, force: true });
@@ -115,7 +124,14 @@ if (process.argv.includes('--check')) {
   }
   for (const w of want) {
     const g = out.find((o) => o.id === w.id);
-    if (!g || g.exit !== w.exit || g.stderr !== w.stderr || g.stdout !== w.stdout) {
+    // A case with stderrPrefix carries something incidental in its full stderr (a JS
+    // engine's own error text on an unexpected-error path, not a message this repo
+    // owns) — exit and stdout still compare exactly, but stderr only has to START WITH
+    // the fixed prefix rather than match byte-for-byte.
+    const stderrOk = w.stderrPrefix !== undefined
+      ? !!g && g.stderr.startsWith(w.stderrPrefix)
+      : g?.stderr === w.stderr;
+    if (!g || g.exit !== w.exit || !stderrOk || g.stdout !== w.stdout) {
       console.error(`golden mismatch: ${w.id}\n want: ${JSON.stringify(w)}\n got:  ${JSON.stringify(g)}`);
       process.exit(1);
     }
