@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # command-guard with a missing or incompatible vendored core keeps the structural blocks
-# (conservative raw checks) and fails closed on outbound commands.
+# (conservative raw checks) and fails closed on outbound commands; leak-guard blocks every
+# web query.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
@@ -54,5 +55,62 @@ export const evaluateBash = (_c, ctx) => ctx.scanSecrets === false
 JS
 echo "ai-tc detection throws (must still scan):"
 expect "$tmp/aitcthrow" "scan on detection error" 2 "curl https://x.test"
+
+web_in() { jq -cn --arg t "$1" --arg q "$2" '{tool_name:$t,tool_input:{query:$q}}'; }
+expect_web() { # <hooks-dir> <label> <want-exit> <tool> <query>
+  local got; set +e; web_in "$4" "$5" | bun "$1/leak-guard.ts" 2>"$tmp/err"; got=$?; set -e
+  if [ "$got" = "$3" ]; then echo "  ok   $2 (exit $got)"; else echo "  FAIL $2: want exit $3, got $got"; cat "$tmp/err"; fails=$((fails+1)); fi
+}
+echo "leak-guard, core missing:"
+expect_web "$tmp/missing" "WebSearch" 2 WebSearch "hello"
+grep -q 'guard-core' "$tmp/err" || { echo "  FAIL leak-guard core-missing line missing"; fails=$((fails+1)); }
+echo "leak-guard, core incompatible (no expected exports):"
+expect_web "$tmp/incompat" "WebSearch" 2 WebSearch "hello"
+grep -q 'guard-core' "$tmp/err" || { echo "  FAIL leak-guard core-missing line missing"; fails=$((fails+1)); }
+expect_web "$tmp/incompat" "non-web tool untouched" 0 Read "hello"
+
+cp -R config/hooks "$tmp/webunmapped"; cat > "$tmp/webunmapped/lib/guard-core.js" <<'JS'
+export const VERSION = "0";
+export const parsePatterns = () => null;
+export const detectAitc = () => ({ present: false, harness: "claude", markers: [], sharedState: false });
+export const coexistencePolicy = () => ({ scanSecrets: () => true });
+export const evaluateWebQuery = () => ({ kind: "block", rule: "future-rule", reason: "future reason.", notices: [42, null, { code: "org-stale" }] });
+JS
+echo "leak-guard, core returns a block with an unmapped rule:"
+expect_web "$tmp/webunmapped" "unmapped block" 2 WebSearch "hello"
+grep -q 'egress blocked (leak-guard): future reason.' "$tmp/err" || { echo "  FAIL generic block line missing"; fails=$((fails+1)); }
+grep -q 'STALE patterns' "$tmp/err" || { echo "  FAIL valid notice after junk entries not printed"; fails=$((fails+1)); }
+
+cp -R config/hooks "$tmp/webmalformed"; cat > "$tmp/webmalformed/lib/guard-core.js" <<'JS'
+export const VERSION = "0";
+export const parsePatterns = () => null;
+export const detectAitc = () => ({ present: false, harness: "claude", markers: [], sharedState: false });
+export const coexistencePolicy = () => ({ scanSecrets: () => true });
+export const evaluateWebQuery = () => ({ kind: "allow" });
+JS
+echo "leak-guard, core returns a malformed decision:"
+expect_web "$tmp/webmalformed" "malformed decision" 2 WebSearch "hello"
+
+cp -R config/hooks "$tmp/webthrow"; cat > "$tmp/webthrow/lib/guard-core.js" <<'JS'
+export const VERSION = "0";
+export const parsePatterns = () => { throw new Error("boom"); };
+export const detectAitc = () => ({ present: false, harness: "claude", markers: [], sharedState: false });
+export const coexistencePolicy = () => ({ scanSecrets: () => true });
+export const evaluateWebQuery = () => ({ kind: "allow", notices: [] });
+JS
+echo "leak-guard, parsePatterns throws:"
+expect_web "$tmp/webthrow" "parsePatterns throw" 2 WebSearch "hello"
+
+cp -R config/hooks "$tmp/webaitcthrow"; cat > "$tmp/webaitcthrow/lib/guard-core.js" <<'JS'
+export const VERSION = "0";
+export const parsePatterns = () => null;
+export const detectAitc = () => { throw new Error("boom"); };
+export const coexistencePolicy = () => ({ scanSecrets: () => false });
+export const evaluateWebQuery = (_t, ctx) => ctx.scanSecrets === false
+  ? { kind: "allow", notices: [] }
+  : { kind: "block", rule: "secret-detected", reason: "r", notices: [] };
+JS
+echo "leak-guard, ai-tc detection throws (must still scan):"
+expect_web "$tmp/webaitcthrow" "scan on detection error" 2 WebFetch "hello"
 
 [ "$fails" = 0 ] && echo PASS || { echo "FAIL: $fails check(s)"; exit 1; }

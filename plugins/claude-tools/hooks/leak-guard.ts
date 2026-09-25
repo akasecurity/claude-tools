@@ -23,9 +23,20 @@
  * self-hosted SearXNG precisely for privacy, so that egress must be scanned too; admitted
  * unconditionally (a no-op when no SearXNG server is configured).
  *
+ * This file is a thin adapter: the tier logic lives in the vendored guard-core library
+ * (lib/guard-core.js, evaluateWebQuery). The adapter owns I/O: it reads the hook JSON,
+ * loads lib/secret-patterns.json and the org sidecar, asks guard-core whether ai-tc covers
+ * this tool in this profile (if so the scan is skipped for that tool; WebSearch is not an
+ * ai-tc tool and is always scanned), and maps the core's rule and notice codes to this
+ * kit's messages.
+ *
  * Protocol: deny → exit 2 (Claude Code blocks); allow → exit 0.
  *
  * FAIL STATES (mirroring the prior bash version's decisions exactly):
+ *   - guard-core missing, unloadable, incompatible (missing exports), throwing or returning
+ *     a malformed decision → FAIL CLOSED: every web query is blocked, loudly.
+ *   - A block decision always exits 2, even for a rule this adapter has no message for.
+ *   - ai-tc detection throws → scan (the safe direction).
  *   - Shared patterns file missing/corrupt → FAIL CLOSED (block the web query loudly),
  *     since we cannot run the credential scan we exist to run.
  *   - Org sidecar missing / unparseable / malformed / bad-regex → org tier INACTIVE
@@ -37,17 +48,33 @@
  * Requires: bun.
  */
 import { readFileSync } from 'fs';
-import { spawnSync } from 'child_process';
 import { createHash } from 'crypto';
+import { dirname, join } from 'path';
+import { homedir } from 'os';
+import { fileURLToPath } from 'url';
+import type { OrgTier, RuleId } from './lib/guard-core.js';
 
-interface HookInput {
-  tool_name?: string;
-  tool_input?: Record<string, unknown> | string;
-}
-interface Patterns {
-  outboundInvocation: string;
-  credentialPatterns: { pattern: string; label: string }[];
-}
+interface HookInput { tool_name?: string; tool_input?: Record<string, unknown> | string }
+
+const CORE_MISSING_MSG = 'egress blocked (leak-guard): the guard-core library is missing or unreadable, so the egress scan can\'t run — blocking this query as a precaution. Reinstall to restore config/hooks/lib/guard-core.js.';
+
+// Messages are the kit's public contract; tests/golden pins them. Keys are guard-core RuleIds.
+// leak-guard only ever sees the web tiers; the structural rules are Bash-only and never
+// returned by evaluateWebQuery, but the map stays total so an unexpected one still reads well.
+const BLOCK_MSG: Record<RuleId, string> = {
+  'patterns-unavailable': 'egress blocked (leak-guard): secret-patterns.json is missing or unreadable, so the egress scan can\'t run — blocking this query as a precaution. Restore config/hooks/lib/secret-patterns.json or reinstall.',
+  'secret-detected': 'egress blocked (leak-guard): query contains a detected secret (trufflehog). Reference it via an environment variable instead of pasting the literal value.',
+  'org-marker': 'egress blocked (leak-guard): query matches an internal identifier from aka-claude-tools.config (hostname, IP, path, or username). Describe it generically instead.',
+  'credential-shape': 'egress blocked (leak-guard): query contains a token or key value.',
+  'pipe-to-shell': 'egress blocked (leak-guard): query was rejected by a structural rule (pipe-to-shell).',
+  'startup-write': 'egress blocked (leak-guard): query was rejected by a structural rule (startup-write).',
+  'search-exec': 'egress blocked (leak-guard): query was rejected by a structural rule (search-exec).',
+};
+const NOTICE_MSG: Record<string, string> = {
+  'scanner-unavailable': 'warn (leak-guard): trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).',
+  'org-stale': 'warn (leak-guard): aka-claude-tools.config changed since install but its org-egress patterns were not recompiled — the org-marker tier is using STALE patterns. Re-run ./install.sh to recompile. (Web egress is still scanned with the last-compiled patterns.)',
+  'org-pattern-invalid': 'warn (leak-guard): the compiled org-marker pattern isn\'t a valid regex — org-marker tier skipped (not silently allowed). Re-run ./install.sh.',
+};
 
 // WEB-egress tools this guard acts on. Anything else passes through (exit 0). WebSearch /
 // WebFetch are exact; the SearXNG MCP tools are matched by the mcp__searxng__ prefix —
@@ -56,47 +83,9 @@ function isWebEgressTool(tool: string): boolean {
   return tool === 'WebSearch' || tool === 'WebFetch' || tool.startsWith('mcp__searxng__');
 }
 
-// Load the shared credential key-shapes (single source of truth). Mirrors the bash:
-//   CRED="$(jq -r '[.credentialPatterns[].pattern] | join("|")' …)"  → one alternation.
-// Returns null → caller FAILS CLOSED (block the web query), when the file is missing /
-// unreadable / has no patterns.
-//
-// DELIBERATE HARDENING over the bash version (cross-check finding, kept by decision): an
-// INVALID regex fragment in secret-patterns.json also returns null here (new RegExp throws),
-// so a CORRUPT patterns file fails CLOSED. The bash version's `[ -z "$CRED" ]` guard only
-// caught an EMPTY join — a malformed-but-nonempty pattern slipped past it and surfaced as a
-// `grep -qE` runtime error at Tier 3, which (a non-zero exit inside an `if`) fell through to
-// ALLOW (exit 0). That exit-0-on-corrupt was a latent gap CONTRARY to leak-guard.sh's own
-// documented contract ("if the shared patterns file is missing/CORRUPT, the guard blocks …
-// rather than silently allowing"). This port fulfills that stated intent; it strengthens a
-// fail-closed decision (never weakens one), and the patterns file is kit-shipped + tsc/corpus-
-// validated, so this only fires on post-install tampering/corruption — exactly when blocking
-// is correct.
-function loadCredPattern(): RegExp | null {
-  try {
-    const p: Patterns = JSON.parse(readFileSync(new URL('./lib/secret-patterns.json', import.meta.url), 'utf-8'));
-    if (!Array.isArray(p.credentialPatterns) || p.credentialPatterns.length === 0) return null;
-    const alt = p.credentialPatterns.map((c) => c.pattern).filter((s) => typeof s === 'string' && s.length > 0);
-    if (alt.length === 0) return null;
-    // grep -qE -- "$CRED" is case-SENSITIVE (no -i); the JS RegExp must match that (no 'i').
-    return new RegExp(alt.join('|'));
-  } catch {
-    return null;
-  }
-}
-
-// trufflehog Tier-1 (local, detection-only). Mirrors the bash branch exactly, including
-// --no-verification (load-bearing: without it trufflehog phones the candidate secret to
-// the provider to "verify" — i.e. the secret leaves from the hook meant to stop it) and
-// the missing-binary degradation: warn to stderr + fall through to the regex tiers.
-function trufflehogDetects(text: string): boolean {
-  const r = spawnSync('trufflehog', ['stdin', '--json', '--no-update', '--no-verification'],
-    { input: text, encoding: 'utf-8' });
-  if (r.error) {
-    console.error('warn (leak-guard): trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).');
-    return false;
-  }
-  return (r.stdout || '').includes('"DetectorName"');
+function loadPatternsRaw(): unknown {
+  try { return JSON.parse(readFileSync(new URL('./lib/secret-patterns.json', import.meta.url), 'utf-8')); }
+  catch { return null; }
 }
 
 // Org-marker tier (opt-in). Reads the install-COMPILED sidecar — never sources the user's
@@ -105,7 +94,6 @@ function trufflehogDetects(text: string): boolean {
 // is set, so a user who ADDS CT_EGRESS_PATTERNS after install (sidecar pattern still empty)
 // still gets the "re-run install" nudge. `patternError` reproduces the bash version's
 // distinct "compiled pattern isn't a valid regex" warning (its grep exit > 1 branch).
-interface OrgTier { pattern: RegExp | null; stale: boolean; patternError: boolean }
 function loadOrgTier(): OrgTier {
   try {
     const sc = JSON.parse(readFileSync(new URL('./lib/org-egress.json', import.meta.url), 'utf-8')) as
@@ -131,7 +119,22 @@ function loadOrgTier(): OrgTier {
   }
 }
 
-function main(): void {
+// The profile this session runs in: ai-tc only counts if its hooks run here too.
+function profileRoots(): string[] {
+  const env = process.env.CLAUDE_CONFIG_DIR;
+  if (env && env.startsWith('/')) return [env];
+  const hooksDir = dirname(fileURLToPath(import.meta.url));
+  if (hooksDir.endsWith('/hooks') && !hooksDir.includes('/plugins/')) return [dirname(hooksDir)];
+  return [join(homedir(), '.claude')];
+}
+
+// guard-core missing, unreadable, incompatible, throwing or malformed: fail closed.
+function coreUnavailable(): never {
+  console.error(CORE_MISSING_MSG);
+  process.exit(2);
+}
+
+async function main(): Promise<void> {
   let input: HookInput;
   try {
     const raw = readFileSync('/dev/stdin', 'utf-8');
@@ -144,6 +147,8 @@ function main(): void {
     process.exit(0);
   }
 
+  // Deliberately no null-guard on the parsed value: a JSON `null` body throws here and
+  // is surfaced by the top-level catch, as before.
   const tool = typeof input.tool_name === 'string' ? input.tool_name : '';
   // Web egress tools only — Bash (and everything else) is not this hook's surface.
   if (!isWebEgressTool(tool)) process.exit(0);
@@ -156,40 +161,48 @@ function main(): void {
     .join(' ');
   if (!query) process.exit(0);
 
-  // ── Load the shared credential definitions (single source of truth) ──
-  const cred = loadCredPattern();
-  if (!cred) {
-    // FAIL CLOSED: patterns unloadable — block the web query, loudly.
-    console.error('egress blocked (leak-guard): secret-patterns.json is missing or unreadable, so the egress scan can\'t run — blocking this query as a precaution. Restore config/hooks/lib/secret-patterns.json or reinstall.');
-    process.exit(2);
-  }
-
-  // ── Tier 1: high-fidelity secret detection (generic, local-only) ──
-  if (trufflehogDetects(query)) {
-    console.error('egress blocked (leak-guard): query contains a detected secret (trufflehog). Reference it via an environment variable instead of pasting the literal value.');
-    process.exit(2);
-  }
-
-  // ── Stale-config advisory (warns, NEVER blocks) + Tier 2: opt-in org markers ──
-  const org = loadOrgTier();
-  if (org.stale) {
-    console.error('warn (leak-guard): aka-claude-tools.config changed since install but its org-egress patterns were not recompiled — the org-marker tier is using STALE patterns. Re-run ./install.sh to recompile. (Web egress is still scanned with the last-compiled patterns.)');
-  }
-  if (org.pattern) {
-    if (org.pattern.test(query)) {
-      console.error('egress blocked (leak-guard): query matches an internal identifier from aka-claude-tools.config (hostname, IP, path, or username). Describe it generically instead.');
-      process.exit(2);
+  type Core = typeof import('./lib/guard-core.js');
+  let core: Core;
+  try {
+    core = await import('./lib/guard-core.js');
+    for (const fn of ['evaluateWebQuery', 'detectAitc', 'coexistencePolicy', 'parsePatterns'] as const) {
+      if (typeof core[fn] !== 'function') throw new Error(`guard-core export ${fn} missing`);
     }
-  } else if (org.patternError) {
-    console.error('warn (leak-guard): the compiled org-marker pattern isn\'t a valid regex — org-marker tier skipped (not silently allowed). Re-run ./install.sh.');
+  } catch {
+    coreUnavailable();
   }
 
-  // ── Tier 3: shared generic key shapes (case-sensitive; require a real value) ──
-  if (cred.test(query)) {
-    console.error('egress blocked (leak-guard): query contains a token or key value.');
+  // ai-tc detection only ever turns scanning off; if it throws, scan (the safe direction).
+  let scanSecrets = true;
+  try {
+    scanSecrets = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots() }))
+      .scanSecrets(tool) !== false;
+  } catch { scanSecrets = true; }
+
+  let d: ReturnType<Core['evaluateWebQuery']>;
+  try {
+    d = core.evaluateWebQuery(query, {
+      patterns: core.parsePatterns(loadPatternsRaw()),
+      org: loadOrgTier(),
+      scanSecrets,
+    });
+    if (!d || typeof d !== 'object' || !Array.isArray(d.notices) || (d.kind !== 'allow' && d.kind !== 'block')) {
+      throw new Error('malformed guard-core decision');
+    }
+  } catch {
+    coreUnavailable();
+  }
+  for (const n of d.notices as unknown[]) {
+    if (!n || typeof n !== 'object') continue;
+    const code = (n as { code?: unknown }).code;
+    const line = typeof code === 'string' ? NOTICE_MSG[code] : undefined;
+    if (line) console.error(line);
+  }
+  if (d.kind === 'block') {
+    const msg = BLOCK_MSG[d.rule] as string | undefined;
+    console.error(msg ?? `egress blocked (leak-guard): ${d.reason}`);
     process.exit(2);
   }
-
   process.exit(0);
 }
 
@@ -199,7 +212,7 @@ function main(): void {
 // directly, so importing for a test never reads stdin / exits.
 if (import.meta.main) {
   try {
-    main();
+    await main();
   } catch (e) {
     console.error('warn (leak-guard): unexpected error — egress scan SKIPPED this call (surfaced, not silent). ' + String(e));
     process.exit(0);
