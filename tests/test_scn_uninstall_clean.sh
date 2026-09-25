@@ -26,7 +26,7 @@ echo "test_scn_uninstall_clean:"
 
 SB="$(sandbox)"
 PROFILE="$SB/.claude-aka"
-ALIAS="aka"
+ALIAS="aka-claude"   # the derived default launcher name (bare aka is reserved for ai-tc)
 RC="$SB/.bashrc"
 
 # Seed an rc with distinct user content BEFORE and AFTER where our block lands,
@@ -49,7 +49,7 @@ DEFAULT_SETTINGS_BEFORE="$(cat "$DEFAULT/settings.json")"
 DEFAULT_SNAP="$(ls -1 "$DEFAULT")"
 
 # ── install the non-default profile ──────────────────────────────────────────
-CT_ADDITIONS="leak-guard" SHELL=/bin/bash HOME="$SB" \
+PATH="$(install_path)" CT_ADDITIONS="leak-guard" SHELL=/bin/bash HOME="$SB" \
   bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$SB/log" 2>&1
 rc=$?
 assert_eq   "install.sh exits 0" "0" "$rc"
