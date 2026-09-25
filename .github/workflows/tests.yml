@@ -34,6 +34,11 @@ jobs:
           printf '%s  %s\n' 7278231dfd7e6a730a4ab7f847b195bcf02289c2d57622b0dab75a6411100c8f "$RTK_DIR/rtk.tar.gz" | sha256sum --check
           tar -xzf "$RTK_DIR/rtk.tar.gz" -C "$RTK_DIR"
           echo "$RTK_DIR" >> "$GITHUB_PATH"
+      - name: Install ripgrep
+        # rtk's `rg` rewrite shells out to the system `rg` binary, which the real-RTK
+        # search-contract tests in tests/rtk-safe-behavior.test.ts exercise directly.
+        # ubuntu-latest does not ship ripgrep by default.
+        run: sudo apt-get update -y && sudo apt-get install -y ripgrep
       - name: tool versions
         run: |
           bash --version | head -1
