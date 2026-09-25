@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Capture or check the exact exit/stderr/stdout of the guard hooks for tests/golden/guard-cases.json.
-import { cpSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync } from 'fs';
+import { chmodSync, cpSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -38,6 +38,24 @@ function buildPathNoTrufflehog(): string {
 }
 const pathNoTruffle = buildPathNoTrufflehog();
 
+// A PATH whose `trufflehog` is a stub that ALWAYS reports a detection, regardless of
+// input — for pinning the trufflehog-DETECTS-a-secret block lines (command-guard.ts's
+// "outbound command contains a detected secret" / leak-guard.ts's "query contains a
+// detected secret"). Built on top of pathNoTruffle (the real trufflehog, if any, is
+// already hidden from PATH there) with one more temp dir — holding only the stub —
+// prepended, so the stub always wins PATH resolution. Host-independent and
+// deterministic: it never shells out to a real trufflehog binary or depends on one
+// being installed.
+function buildPathTrufflehogHit(): string {
+  const stubDir = mkdtempSync(join(tmpdir(), 'golden-stub-'));
+  shadowDirs.push(stubDir);
+  const stubPath = join(stubDir, 'trufflehog');
+  writeFileSync(stubPath, '#!/bin/sh\ncat >/dev/null\necho \'{"DetectorName":"X"}\'\n');
+  chmodSync(stubPath, 0o755);
+  return [stubDir, pathNoTruffle].join(':');
+}
+const pathTrufflehogHit = buildPathTrufflehogHit();
+
 function hooksDirFor(c: Case): { dir: string; cleanup: () => void } {
   const isOrgStale = c.id.endsWith('-org-stale');
   if (c.env !== 'patterns-missing' && c.env !== 'org' && !isOrgStale) {
@@ -65,7 +83,12 @@ const out = cases.map((c) => {
   const { dir, cleanup } = hooksDirFor(c);
   const r = Bun.spawnSync([process.execPath, join(dir, `${c.hook}.ts`)], {
     stdin: new TextEncoder().encode(c.raw ?? JSON.stringify(c.input)),
-    env: { ...process.env, PATH: c.env === 'notrufflehog' || c.env === 'patterns-missing' || c.env === 'org' ? pathNoTruffle : process.env.PATH },
+    env: {
+      ...process.env,
+      PATH: c.env === 'trufflehog-hit' ? pathTrufflehogHit
+        : c.env === 'notrufflehog' || c.env === 'patterns-missing' || c.env === 'org' ? pathNoTruffle
+        : process.env.PATH,
+    },
   });
   cleanup();
   return { id: c.id, exit: r.exitCode, stderr: r.stderr.toString(), stdout: r.stdout.toString() };
@@ -76,6 +99,20 @@ for (const shadow of shadowDirs) rmSync(shadow, { recursive: true, force: true }
 const goldenPath = join(root, 'tests/golden/guard-output.json');
 if (process.argv.includes('--check')) {
   const want = JSON.parse(readFileSync(goldenPath, 'utf-8')) as typeof out;
+  // Two-way id check FIRST: `out` is built from the LIVE guard-cases.json, so a case
+  // added there without re-capturing must fail loudly here rather than passing
+  // silently because the compare loop below only ever walks `want`'s ids. Equally, a
+  // case removed from guard-cases.json but still sitting in the golden file (stale)
+  // must fail too — the golden file no longer describes what the case list produces.
+  const wantIds = new Set(want.map((w) => w.id));
+  const gotIds = new Set(out.map((o) => o.id));
+  const newInCases = out.map((o) => o.id).filter((id) => !wantIds.has(id));
+  const missingFromCases = want.map((w) => w.id).filter((id) => !gotIds.has(id));
+  if (newInCases.length || missingFromCases.length) {
+    if (newInCases.length) console.error(`golden mismatch: case(s) in guard-cases.json not captured in guard-output.json: ${newInCases.join(', ')} — re-run without --check to capture`);
+    if (missingFromCases.length) console.error(`golden mismatch: case(s) in guard-output.json no longer in guard-cases.json: ${missingFromCases.join(', ')} — stale golden entries, re-run without --check to recapture`);
+    process.exit(1);
+  }
   for (const w of want) {
     const g = out.find((o) => o.id === w.id);
     if (!g || g.exit !== w.exit || g.stderr !== w.stderr || g.stdout !== w.stdout) {
