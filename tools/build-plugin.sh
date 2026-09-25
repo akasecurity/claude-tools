@@ -16,7 +16,7 @@ jq -n --arg v "$(cat VERSION)" '{
 
 # copy launcher + preflight + shared lib (secret-patterns.json only, for defense-in-depth)
 install -m 0755 config/hooks/bun-hook-launch.sh config/hooks/preflight.sh "$HK"/
-mkdir -p "$HK/lib" && cp config/hooks/lib/secret-patterns.json "$HK/lib/secret-patterns.json"
+mkdir -p "$HK/lib" && cp config/hooks/lib/secret-patterns.json config/hooks/lib/guard-core.js "$HK/lib/"
 
 # copy each bundled guard + build its hooks.json entry from additions.json
 hooks='{"hooks":{"PreToolUse":[],"SessionStart":[]}}'

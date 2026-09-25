@@ -1040,9 +1040,11 @@ apply_additions() {
   is_selected feedback-survey-off  "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.feedback-survey-off.json")"
 
   # Shared library the egress guards read (single source of truth for the
-  # secret/outbound patterns). Placed whenever either guard is selected, so both
-  # bash and TS resolve config/hooks/lib/secret-patterns.json relative to themselves.
-  if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids"; then
+  # secret/outbound patterns) and the vendored guard-core (every bun guard hook).
+  # Placed whenever any consumer is selected, so bash and TS both resolve
+  # config/hooks/lib/{secret-patterns.json,guard-core.js} relative to themselves.
+  if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" \
+    || is_selected rtk-safe "$_sel_ids"; then
     place_dir "$CONFIG_SRC/hooks/lib" "$config_dir/hooks"
   fi
 
@@ -1281,9 +1283,10 @@ apply_additions() {
   # compiled hooks/lib/org-egress.json sidecar) are owned by NO single addition — they're
   # placed/compiled whenever EITHER leak-guard or command-guard is selected. The
   # per-addition deselect loop above can't remove them (neither guard's owned-paths list
-  # includes them), so deselecting BOTH guards would orphan them — and a leftover
-  # org-egress.json would also make the rmdir below fail, persisting hooks/lib. Remove
-  # both only when NEITHER consumer remains.
+  # includes them), so deselecting BOTH guards would orphan them. Remove both only when
+  # NEITHER consumer remains. The vendored guard-core has a wider consumer set (every
+  # bun guard hook, including rtk-safe), so it's cleaned up separately below — only once
+  # NO consumer remains does the now-empty hooks/lib dir come down.
   if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids"; then
     _egress_lib_removed=
     for _lib in secret-patterns.json org-egress.json; do
@@ -1293,6 +1296,11 @@ apply_additions() {
       fi
     done
     [ -n "$_egress_lib_removed" ] && ok "Removed shared egress-guard lib (no guard selected)"
+  fi
+  if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids" \
+    && ! is_selected rtk-safe "$_sel_ids"; then
+    rm -f "$config_dir/hooks/lib/guard-core.js" "$config_dir/hooks/lib/guard-core.d.ts" \
+      "$config_dir/hooks/lib/guard-core.lock.json"
     rmdir "$config_dir/hooks/lib" 2>/dev/null || true
   fi
 
