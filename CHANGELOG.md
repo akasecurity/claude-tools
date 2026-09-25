@@ -18,6 +18,22 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   brace groups. Ordinary searches are unaffected, including `rg -- --pre`, `--preview`
   and `--pretty=`. `--search-zip` is intentionally not blocked — it spawns only rg's
   built-in decompressors, so the caller chooses no binary.
+- **PATH-visible launcher shim**: alongside the shell alias, the installer now writes an
+  executable shim at `<profile>/bin/<name>` and adds a guarded `PATH` export to the managed
+  rc block. Scripts, non-interactive shells, and the ai-tc `aka` CLI's git-style external
+  subcommand dispatch (`aka claude` → execs `aka-claude` from PATH) can launch the profile.
+  `--delete-alias` removes the shim with the block (marker-gated — a user file that merely
+  shares the name is never deleted), and `uninstall.sh`'s profile removal covers it for free.
+- **PATH-conflict check**: `--alias` refuses (strict) or offers an alternate name
+  (interactive) before claiming a launcher name that is already a command on PATH.
+  A profile path containing a `:` gets the alias and shim but no `PATH` entry — a
+  colon would split it into a relative `PATH` entry — and the installer says so.
+
+### Changed
+- **Default launcher name is `aka-claude`** (was `aka`) for `~/.claude-aka` and the fallback
+  derivation. Bare `aka` is reserved for the ai-tc AI Traffic Control CLI so `aka claude` can
+  dispatch to this launcher. Basename-derived names (`~/.claude-work` → `work`) are unchanged.
+  Existing profiles keep whatever alias they recorded; re-running does not rename them.
 
 ### Fixed
 - `rtk-safe` restores standalone `grep`/`rg` rewriting on stable RTK >= 0.49.0, with

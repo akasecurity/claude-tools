@@ -32,6 +32,9 @@ if ! command -v expect >/dev/null 2>&1; then
 fi
 
 SB="$(sandbox)"
+# Hermetic PATH for the spawned installer: an operator's real `aka-claude` PATH
+# command must not trigger the installer's conflict-rename mid-PTY-script.
+IPATH="$(install_path)"
 RC="$SB/.bashrc"; touch "$RC"            # deterministic rc target for alias blocks
 P1="$SB/.claude-aka"                     # first profile (accept the default folder)
 P2="$SB/.claude-work"                    # second profile (typed in the loop)
@@ -66,7 +69,7 @@ log_user 1
 # split the literal label across a newline and defeat the -ex substring match.
 set stty_init "rows 80 cols 1000"
 # spawn the installer under a PTY; --no-auth-inherit, NO --defaults.
-spawn env HOME=$SB SHELL=/bin/bash NO_COLOR=1 bash $REPO_ROOT/install.sh --no-auth-inherit
+spawn env HOME=$SB SHELL=/bin/bash NO_COLOR=1 PATH=$IPATH bash $REPO_ROOT/install.sh --no-auth-inherit
 
 # Track which profile pass we're in so the folder/alias answers differ.
 set pass 1
@@ -86,6 +89,7 @@ $ADDITION_MATCHERS
     if {\$pass == 1} { set pass 2; send "y\r" } else { send "n\r" }
     exp_continue
   }
+  -re {Show how to add ai-tc}           { send "y\r"; exp_continue }
   -re {Pin a location}                  { send "\r"; exp_continue }
   timeout { puts "EXPECT_TIMEOUT"; exit 2 }
   eof
@@ -101,6 +105,10 @@ rc=$?
 assert_eq   "interactive install exits 0" "0" "$rc"
 assert_ngrep "no expect timeout (menu never hung)" "EXPECT_TIMEOUT" "$LOG"
 assert_grep "install reported done" 'Done|ready' "$LOG"
+# ai-tc offer fires (no ai-tc in the sandbox HOME) and, on accept, prints the
+# marketplace install command — the security-depth handoff to the detection engine.
+assert_grep "ai-tc offer shown" 'Show how to add ai-tc' "$LOG"
+assert_grep "ai-tc install command printed on accept" 'plugin install ai-tc@akasecurity' "$LOG"
 
 # ── profile 1: selection honored ──────────────────────────────────────────────
 assert_file "profile 1 dir created" "$P1"
@@ -131,8 +139,8 @@ assert_file "p2 selection honored: wrap-up command" "$P2/commands/wrap-up.md"
 assert_ok   "profiles 1 and 2 are distinct dirs" bash -c "[ '$P1' != '$P2' ] && [ -d '$P1' ] && [ -d '$P2' ]"
 
 # ── aliases: one managed block per profile, each pointing at its own dir ───────
-assert_lit  "rc has alias block for profile 1 (aka)" \
-  ">>> aka-claude-tools managed: aka" "$RC"
+assert_lit  "rc has alias block for profile 1 (aka-claude — the derived default)" \
+  ">>> aka-claude-tools managed: aka-claude" "$RC"
 assert_lit  "rc has alias block for profile 2 (work)" \
   ">>> aka-claude-tools managed: work" "$RC"
 assert_lit  "p1 alias points at profile 1 dir" "CLAUDE_CONFIG_DIR=\"$P1\"" "$RC"
