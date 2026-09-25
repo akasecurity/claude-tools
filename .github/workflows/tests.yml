@@ -24,6 +24,21 @@ jobs:
       # statusline is selected without it, so CI needs bun to exercise the full recommended
       # install the flow suite asserts.
       - uses: oven-sh/setup-bun@v2
+      - name: Install RTK compatibility baseline
+        # Pin the binary and its digest; no rtk init or live profile changes.
+        run: |
+          set -euo pipefail
+          RTK_DIR="$(mktemp -d)"
+          curl --fail --location --retry 3 -o "$RTK_DIR/rtk.tar.gz" \
+            https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-x86_64-unknown-linux-musl.tar.gz
+          printf '%s  %s\n' 7278231dfd7e6a730a4ab7f847b195bcf02289c2d57622b0dab75a6411100c8f "$RTK_DIR/rtk.tar.gz" | sha256sum --check
+          tar -xzf "$RTK_DIR/rtk.tar.gz" -C "$RTK_DIR"
+          echo "$RTK_DIR" >> "$GITHUB_PATH"
+      - name: Install ripgrep
+        # rtk's `rg` rewrite shells out to the system `rg` binary, which the real-RTK
+        # search-contract tests in tests/rtk-safe-behavior.test.ts exercise directly.
+        # ubuntu-latest does not ship ripgrep by default.
+        run: sudo apt-get update -y && sudo apt-get install -y ripgrep
       - name: tool versions
         run: |
           bash --version | head -1
@@ -38,6 +53,8 @@ jobs:
           bun install --frozen-lockfile
           bunx tsc --noEmit
       - name: run the flow suite
+        env:
+          CT_REQUIRE_RTK: "1"
         # Sandboxed (fake $HOME, throwaway clones) — touches no real profile.
         # Exercises: install.sh forward deploy + path remap, additions.json
         # manifest integrity (no orphans / missing files), and promote.sh

@@ -65,6 +65,17 @@ const FALLBACK_OUTBOUND = /\b(curl|wget|nc|ncat|socat|fetch)\b/i;
 // separator after each \S+ keeps the quantifier linear (no catastrophic backtracking).
 const PIPE_TO_SHELL_RAW = /\|&?\s*(?:(?:\S*\/)?env\s+(?:\S+\s+)*)?(?:\S*\/)?(?:sh|bash|zsh)\b/i;
 const STARTUP_WRITE_RAW = /(?:>|\btee\b|\bsed\b|\bcp\b|\bmv\b|\binstall\b|\bln\b|\bdd\b)[^\n]*\.(?:zshrc|zshenv|zprofile|bashrc|bash_profile|profile)\b/;
+// Raw fallback for the search-tool exec vector. Deliberately broader than the tokenizer
+// path (any of the three markers anywhere on the line), since the fallback must be a
+// conservative SUPERSET — over-blocking a mention of `--pre` is acceptable.
+//
+// The quote classes are load-bearing, not decoration. tokenize() STRIPS quotes, so the
+// token path sees `--pre` in `rg '--pre' x`; a fallback anchored on whitespace alone did
+// not, which made it a conservative SUBSET on exactly the inputs it exists to cover — a
+// tokenizer throw plus a quoted flag failed OPEN on the sole Bash guard. Match a quote
+// on either side, and use a negative lookahead (not `[=\s]`) so `--pre"` and `--pre'`
+// still hit while `--preview` / `--pretty=` stay clear.
+const SEARCH_EXEC_RAW = /(?:^|[\s'"])--(?:pre|hostname-bin)(?![\w-])|RIPGREP_CONFIG_PATH=/;
 
 // A shell startup-file basename (leading dot) — the persistence-vector targets.
 const STARTUP_BASENAME = /^\.(zshrc|zshenv|zprofile|bashrc|bash_profile|profile)$/;
@@ -244,6 +255,16 @@ function isInterpreterWord(w: string): boolean {
 // above): `env -S '…'` (split-string embeds the command in a quoted string) and space-separated
 // long-option arg forms (`env --unset FOO bash`); both are obfuscation, not accidental danger.
 const SUBSHELL_OPENERS = new Set(['(', '{']);
+// Exec wrappers that sit between an env prefix and the real verb — `env rg --pre …` must
+// resolve to `rg`, not stop at `env`. Mirrors the walk pipeFeedsShellInterpreter already
+// does for `env`; the rest are the same class (they exec their argument unchanged).
+const SEARCH_WRAPPERS = new Set(['env', 'command', 'nice', 'ionice', 'nohup', 'setsid', 'stdbuf', 'time']);
+// Verbs that EXPORT an assignment rather than prefixing one command, so the variable
+// applies to every later command in the same call (`export FOO=1; rg …`).
+const ENV_SETTING_VERBS = new Set(['export', 'declare', 'typeset', 'readonly']);
+// ripgrep reads flags from the file this points at, so it injects --pre with neither
+// flag appearing in the command text.
+const RG_CONFIG_ENV = /^RIPGREP_CONFIG_PATH=/;
 // Once the pipe target is confirmed a shell interpreter, decide whether it actually CONSUMES
 // the piped stdin (the `curl URL | bash` risk) or just runs a NAMED SCRIPT FILE and ignores
 // stdin (`printf '{}' | bash ./script.sh` — a benign FP, issue #94). Starting at the token
@@ -393,6 +414,101 @@ function detectPipeToShell(toks: Tok[]): boolean {
   return false;
 }
 
+// Search-tool EXEC vector. ripgrep can be made to run an arbitrary binary, and the kit
+// auto-approves `Bash(rtk rg:*)` for token savings — a prefix rule, so it approves every
+// suffix. This closes the vector at the security boundary instead, which is what makes
+// that approval safe. Three channels, all verified live against rg 14.x / rtk 0.49.0:
+//
+//   --pre <CMD>           runs CMD on every searched file  (confirmed exec)
+//   --hostname-bin <CMD>  runs CMD to resolve the hostname for hyperlinks
+//   RIPGREP_CONFIG_PATH=  points rg at a config FILE whose contents are flags — so it
+//                         injects `--pre` indirectly, without either flag appearing in
+//                         the command text (confirmed exec)
+//
+// `--search-zip`/`-z` is deliberately NOT blocked: it spawns only rg's built-in list of
+// decompressors (gzip/xz/zstd/…) found on PATH, so the attacker picks no binary — that's
+// a PATH-hijack class, not a flag-injection one, and blocking it would break legitimate
+// compressed searches.
+function detectSearchExec(toks: Tok[]): boolean {
+  // Same simple-command split detectStartupWrite uses. Duplicated rather than extracted:
+  // that detector is a live security boundary and refactoring it is not worth the risk
+  // here (every token-stream consumer has to be re-verified when its shape changes).
+  let cur: Tok[] = [];
+  const cmds: Tok[][] = [];
+  for (const t of toks) {
+    if (t.op && (t.v === '|' || t.v === '||' || t.v === '&&' || t.v === ';' || t.v === '&' || t.v === '\n')) { if (cur.length) cmds.push(cur); cur = []; }
+    else cur.push(t);
+  }
+  if (cur.length) cmds.push(cur);
+  for (const sc of cmds) {
+    let words = sc.filter((t) => !t.op).map((t) => t.v);
+    // `{ rtk rg … ; }` / `( rtk rg … )` — strip group openers, same as the pipe detector.
+    while (words.length && SUBSHELL_OPENERS.has(words[0])) words = words.slice(1);
+    if (!words.length) continue;
+
+    // Resolve the EFFECTIVE command: walk inline assignments and wrapper verbs in any
+    // interleaving. Everything here was a live bypass of the first version, which only
+    // accepted a leading inline `NAME=VALUE` run and a bare verb.
+    let i = 0;
+    for (;;) {
+      const w = words[i];
+      if (w === undefined) break;
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
+        // The config-file channel needs no flag in the command text, and has no
+        // legitimate agent use — the assignment IS the vector, whatever verb follows.
+        if (RG_CONFIG_ENV.test(w)) return true;
+        i++; continue;
+      }
+      const base = cmdBasename(w);
+      // `export RIPGREP_CONFIG_PATH=…` (also declare -x / typeset / readonly) sets it for
+      // everything that follows in the same call — `export …; rtk rg .` needs no session
+      // persistence to land. An export/declare runs no further command, so stop after it.
+      if (ENV_SETTING_VERBS.has(base)) {
+        if (words.slice(i + 1).some((a) => RG_CONFIG_ENV.test(a))) return true;
+        break;
+      }
+      // `env …`, and the plain exec wrappers, stand between the prefix and the real verb.
+      if (SEARCH_WRAPPERS.has(base)) {
+        i++;
+        while (i < words.length) {
+          const a = words[i];
+          if (a === '-') { i++; continue; }                 // `env -` ignore-environment
+          if (a.startsWith('-')) { if (/^-[uCPa]$/.test(a)) i++; i++; continue; }
+          if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(a)) {
+            if (RG_CONFIG_ENV.test(a)) return true;
+            i++; continue;
+          }
+          break;                                            // first bare word: its command
+        }
+        continue;                                           // re-resolve (could be another env)
+      }
+      break;
+    }
+    if (i >= words.length) continue;
+
+    // Which verbs reach a search engine: `rg …`, `rtk rg …`, and `rtk grep …`. rtk grep
+    // dispatches to the system grep today (which rejects --pre), but it is rtk's choice
+    // to make and could change between releases — cover it rather than depend on that.
+    let ai = i + 1;
+    const verb = cmdBasename(words[i]);
+    if (verb === 'rtk') {
+      // rtk takes its OWN options before the subcommand (-v/--verbose, --ultra-compact,
+      // --skip-env), so the subcommand is not necessarily words[i+1].
+      let k = i + 1;
+      while (k < words.length && words[k] !== '--' && words[k].startsWith('-')) k++;
+      const sub = cmdBasename(words[k] ?? '');
+      if (sub !== 'rg' && sub !== 'grep') continue;
+      ai = k + 1;
+    } else if (verb !== 'rg') continue;
+    for (let j = ai; j < words.length; j++) {
+      const w = words[j];
+      if (w === '--') break; // everything after `--` is an operand, not a flag
+      if (/^--(?:pre|hostname-bin)(?:=|$)/.test(w)) return true;
+    }
+  }
+  return false;
+}
+
 // startup-file WRITE: (1) a redirection (> / >> / fd>) whose target is a startup file,
 // or (2) a write-capable command with a startup file as its DESTINATION. Direction-aware:
 // a startup file as a cp/mv/ln SOURCE is a read and is NOT flagged.
@@ -530,15 +646,17 @@ function main(): void {
   // tokenizer throws on pathological input (e.g. nesting past the depth cap), fall back
   // to the CONSERVATIVE raw-string regexes — over-block, never silently allow. This is
   // the sole Bash guard, so a parser failure must NEVER fail open.
-  let pipeToShell: boolean, startupWrite: boolean;
+  let pipeToShell: boolean, startupWrite: boolean, searchExec: boolean;
   try {
     const toks = tokenize(command);
     pipeToShell = detectPipeToShell(toks);
     startupWrite = detectStartupWrite(toks);
+    searchExec = detectSearchExec(toks);
   } catch {
     console.error('[aka-claude-tools SECURITY] ⚠️ command-guard: command too complex to parse precisely — falling back to strict structural checks (may over-block).');
     pipeToShell = PIPE_TO_SHELL_RAW.test(command);
     startupWrite = STARTUP_WRITE_RAW.test(command);
+    searchExec = SEARCH_EXEC_RAW.test(command);
   }
 
   // Pipe-to-shell — structural, patterns-independent.
@@ -550,6 +668,13 @@ function main(): void {
   // Startup-file write — structural persistence-vector check.
   if (startupWrite) {
     console.error('[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): writing to a shell startup file (~/.zshrc, ~/.bashrc, …) is a persistence vector. Your dotfiles are Edit/Write-denied; a Bash redirection bypasses that. If intentional, run it in your own shell (e.g. a `! <cmd>` prompt); for a profile alias use `./install.sh --alias`.');
+    process.exit(2);
+  }
+
+  // Search-tool exec — structural. Paired with the `Bash(rtk rg:*)` approval in
+  // rtk-allowlist.json: that prefix rule is only safe because this blocks the exec flags.
+  if (searchExec) {
+    console.error('[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): ripgrep\'s --pre / --hostname-bin run an arbitrary binary, and RIPGREP_CONFIG_PATH injects flags from a file. `rtk rg` is auto-approved for token savings, so these are blocked here. Search without them, or run it in your own shell (e.g. a `! <cmd>` prompt).');
     process.exit(2);
   }
 

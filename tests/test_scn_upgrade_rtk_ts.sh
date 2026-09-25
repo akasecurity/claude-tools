@@ -39,7 +39,7 @@ cat > "$PROFILE/settings.json" <<JSON
 { "hooks": { "PreToolUse": [
   { "matcher": "Bash", "hooks": [ { "type": "command", "command": "'$PROFILE'/hooks/rtk-safe.sh" } ] },
   { "matcher": "Bash", "hooks": [ { "type": "command", "command": "$PROFILE/hooks/my-own.sh" } ] }
-] } }
+] }, "permissions": { "allow": ["Bash(rtk find:*)", "Bash(rtk git branch:*)", "Bash(echo:*)"] } }
 JSON
 
 # ── (1) upgrade: re-run install with the current manifest, selecting rtk-safe ─────
@@ -64,5 +64,10 @@ assert_eq "rtk-safe.ts registered via bun" "1" "$bun_ts"
 # (d) unrelated user hook + registration untouched
 assert_file "user hook my-own.sh kept" "$PROFILE/hooks/my-own.sh"
 assert_lit  "user my-own.sh registration kept" "$PROFILE/hooks/my-own.sh" "$S"
+
+assert_ok "upgrade retires broad find/branch approvals" jq -e \
+  '.permissions.allow | index("Bash(rtk find:*)") == null and index("Bash(rtk git branch:*)") == null' "$S"
+assert_ok "upgrade preserves user approval" jq -e \
+  '.permissions.allow | index("Bash(echo:*)") != null' "$S"
 
 t_summary

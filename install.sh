@@ -436,9 +436,15 @@ reconcile_managed_perms() {
   local key arr_new arr_exist arr_ret added retired_present n_add n_ret shown=0
   for key in deny allow ask; do
     arr_new="$(jq -c --arg k "$key" '.permissions[$k] // []' <<<"$add")"
-    # Only reconcile arrays the kit actually provides this run — never touch an
-    # array the engineer selected no addition for.
-    [ "$(jq 'length' <<<"$arr_new")" = "0" ] && continue
+    # NOTE: an array the kit ships nothing into this run is still reconciled, because
+    # RETIREMENT is independent of what's selected. permissions.allow is supplied only
+    # by rtk-allowlist.json, so gating on a non-empty arr_new meant a user who upgraded
+    # while DESELECTING rtk-safe kept every retired allow rule forever — exactly the
+    # users who most need `Bash(rtk find:*)` (which passes -exec/-delete through) gone.
+    # Nothing is invented for an unselected array: `added` below is ([] - existing) = [],
+    # so only the retire branch can fire, and it only ever touches strings the kit itself
+    # shipped in the past (.retired[]). Rules the kit never shipped stay untouched.
+    # The real "nothing to do" test is the n_add/n_ret guard a few lines down.
     arr_exist="$(jq -c --arg k "$key" '.permissions[$k] // []' <<<"$existing")"
     arr_ret="$(jq -c --arg k "$key" '(.retired[$k]) // []' <<<"$RETIRED_PERMS")"
 
@@ -1356,6 +1362,32 @@ apply_additions() {
   # version's set), without ever touching rules they added themselves.
   reconcile_managed_perms "$existing" "$add"
   existing="$RECON_EXISTING"; add="$RECON_ADD"
+
+  # ── rtk rg ⟷ command-guard coupling (enforced on BOTH sides of the merge) ──
+  # `Bash(rtk rg:*)` is the one allow rule that is not safe standalone: ripgrep's
+  # --pre/--hostname-bin execute an arbitrary binary and RIPGREP_CONFIG_PATH injects flags
+  # from a file, and a PREFIX rule approves every suffix. command-guard's detectSearchExec
+  # is what makes it safe, so the two must never be separated.
+  #
+  # Filtering only the incoming `add` was not enough: merge_settings UNIONS, command-guard
+  # contributes no permissions payload for prune_addition_from_settings to strip, and the
+  # rule is not in .retired[] (it is current, not retired), so an upgrade that DESELECTED
+  # command-guard left a live approval with no guard behind it — the one state the design
+  # says must never ship. Strip it from the EXISTING profile too, every run, whenever the
+  # guard is not selected. rg is still REWRITTEN (the token saving is kept); it just
+  # prompts, exactly as with no approval.
+  if ! is_selected command-guard "$_sel_ids"; then
+    local _rgrule='Bash(rtk rg:*)' _had_rg=0
+    jq -e --arg r "$_rgrule" '((.permissions.allow // []) | index($r)) != null' <<<"$existing" >/dev/null 2>&1 && _had_rg=1
+    local _strip='(.permissions.allow) |= (if type=="array" then map(select(. != $r)) else . end)'
+    existing="$(jq -c --arg r "$_rgrule" "$_strip" <<<"$existing")"
+    add="$(jq -c --arg r "$_rgrule" "$_strip" <<<"$add")"
+    if [ "$_had_rg" = "1" ]; then
+      warn "Removed the existing 'Bash(rtk rg:*)' approval: it requires command-guard, which is not selected. rg stays compressed; it will prompt."
+    else
+      warn "rtk rg auto-approval withheld: it requires command-guard (which blocks ripgrep's --pre/--hostname-bin/RIPGREP_CONFIG_PATH exec vectors). rg is still compressed; it will prompt."
+    fi
+  fi
   # Write when there's something to write OR a settings.json already exists — the
   # latter so deselecting the LAST settings-contributing addition (merge result
   # back to {}) actually persists; otherwise the empty merge is skipped and the

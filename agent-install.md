@@ -90,7 +90,7 @@ don't specify one:
 - Which **additions** to layer on (read `config/additions.json` in this repo for
   the catalog + recommended defaults): secure base settings, leak-guard,
   command-guard (needs `bun`; also blocks writes to shell startup files),
-  rtk-safe (inert until `rtk` is installed), responsive status line, shell-audit,
+  rtk-safe (inert until stable `rtk` >= 0.49.0 is installed), responsive status line, shell-audit,
   the recommended nonessential-traffic toggles that don't touch Remote Control
   (error-reporting-off, feedback-off, feedback-survey-off), the opt-out `/wrap-up`
   command, the opt-out secure-research and secure-deep-research workflows, the opt-out

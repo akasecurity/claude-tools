@@ -56,11 +56,13 @@ eq('cat ~/.config/gh/hosts.yml', null);
 eq('cat .git-credentials', null);
 eq('cat ~/.docker/config.json', null);
 eq('cat ~/.npmrc', null);
-eq('head -20 big.log', 'rtk read big.log --max-lines 20');
-eq('head --lines=5 a.txt', 'rtk read a.txt --max-lines 5');
+// head is no longer rewritten in ANY form: `rtk read --max-lines N` renders ~floor(N/2)
+// lines, so the rewrite silently halved the window the caller asked for.
+eq('head -20 big.log', null);
+eq('head --lines=5 a.txt', null);
 eq('head big.log', null);            // head without -N → no rewrite
-eq('head -n 20 big.log', null);      // PARITY: old hook matched only `head -N`, not `-n N`
-eq('head -n20 big.log', null);       // PARITY: `-nN` likewise not rewritten (unchanged)
+eq('head -n 20 big.log', null);
+eq('head -n20 big.log', null);
 eq('head -5 ~/.netrc', null);        // credential path → not rewritten
 eq('head -10 ~/.aws/credentials', null);
 
@@ -76,22 +78,23 @@ eq('diff', null);
 
 // ── JS/TS runners ─────────────────────────────────────────────────────────────
 eq('npm test', 'rtk npm test');
-eq('npm run build', 'rtk npm build');
+eq('npm run build', 'rtk npm run build');
+eq('npm run install -- --dry-run', 'rtk npm run install -- --dry-run');
 eq('npm run', null);                 // no script name
-eq('pnpm test', 'rtk vitest run');
-eq('vitest', 'rtk vitest run');
+eq('pnpm test', null); // project scripts need not use vitest
+eq('vitest', null); // preserve watch mode
 eq('vitest run src', 'rtk vitest run src');
-eq('npx vitest', 'rtk vitest run');
-eq('pnpm vitest run --coverage', 'rtk vitest run --coverage');
+eq('npx vitest', null);
+eq('pnpm vitest run --coverage', null); // preserve package-manager resolution
 eq('tsc', 'rtk tsc');
-eq('npx tsc --noEmit', 'rtk tsc --noEmit');
-eq('npx vue-tsc', 'rtk tsc');
-eq('pnpm tsc', 'rtk tsc');
+eq('npx tsc --noEmit', null);
+eq('npx vue-tsc', null);
+eq('pnpm tsc', null);
 eq('eslint .', 'rtk lint .');
-eq('npx eslint src', 'rtk lint src');
-eq('pnpm lint', 'rtk lint');
+eq('npx eslint src', null);
+eq('pnpm lint', null);
 eq('prettier --check .', 'rtk prettier --check .');
-eq('npx prisma generate', 'rtk prisma generate');
+eq('npx prisma generate', null);
 eq('pnpm list', 'rtk pnpm list');
 eq('pnpm outdated', 'rtk pnpm outdated');
 eq('pnpm install', null);            // install not in the query set
@@ -114,14 +117,14 @@ eq('wget https://example.com/f', 'rtk wget https://example.com/f');
 // ── python / go / misc ────────────────────────────────────────────────────────
 eq('pytest -q', 'rtk pytest -q');
 eq('pytest', 'rtk pytest');
-eq('python -m pytest tests/', 'rtk pytest tests/');
-eq('python -m mypy .', 'rtk mypy .');
+eq('python -m pytest tests/', null); // keep the selected interpreter
+eq('python -m mypy .', null);
 eq('mypy src', 'rtk mypy src');
 eq('ruff check .', 'rtk ruff check .');
 eq('ruff format', 'rtk ruff format');
 eq('pip install requests', 'rtk pip install requests');
 eq('pip uninstall x', null);
-eq('uv pip list', 'rtk pip list');
+eq('uv pip list', null);
 eq('go test ./...', 'rtk go test ./...');
 eq('go build', 'rtk go build');
 eq('go run main.go', null);          // run not in the set
@@ -141,6 +144,51 @@ eq('cat <<EOF\nhi\nEOF', null);      // heredoc (also multiline)
 eq('git status\ngit log', null);     // multiline
 eq('echo hello', null);              // not in any rule
 eq('', null);                        // empty
+
+// Shell operators must not move options onto another command or feed compressed
+// output to a program. Conservative skips also cover operators inside quotes.
+for (const command of [
+  'head -5 README.md | wc -l', 'head -5 README.md && echo done',
+  'cat README.md > copy.md', 'cat README.md | python parse.py',
+  'git status; echo done', 'git status || echo failed', 'git status &',
+  'cat $(echo README.md)', 'cat `echo README.md`', 'cat "$FILE"',
+  'cat <(echo hello)', 'cat README.md # comment', 'cat a\\ b',
+  'cat -s README.md', 'cat -', 'cat --help',
+  'FOO="two words" git status',
+  'FOO="x cat file"', 'head -5 -v file.txt',
+  'PATH=/old/bin:/usr/bin grep -v needle file.txt',
+  'FOO=bar PATH=/old/bin rg needle file.txt',
+]) eq(command, null);
+
+eq('grep -n needle file.txt', 'rtk grep -n needle file.txt');
+eq('grep -v needle file.txt', 'rtk grep -v needle file.txt');
+eq('grep needle ~/.ssh/id_rsa', null);
+// rg IS rewritten (highest-value rewrite after `rtk read`). `Bash(rtk rg:*)` is safe only
+// because command-guard blocks ripgrep's exec flags — see tests/corpus.json. rtk-safe is a
+// token-saver, not a gate, so it still rewrites the exec forms; the guard is what stops
+// them. Asserted here so the division of labour stays explicit.
+eq('rg -n needle src', 'rtk rg -n needle src');
+eq('rg --json needle src', 'rtk rg --json needle src');
+eq('rg needle project/.env', null);
+eq('rg --pre ./x.sh needle .', 'rtk rg --pre ./x.sh needle .');
+
+// A standalone -h/--help is claimed by rtk's own parser before it reaches the underlying
+// tool, which would print rtk usage and exit 0 — an empty result that reads as "no match".
+// Applies to every fronted command, not just search.
+eq('grep -h needle a.txt b.txt', null);
+eq('grep --help', null);
+eq('ls -h', null);
+eq('wc -h a.txt', null);
+eq('diff -h a.txt b.txt', null);
+eq('git -h status', null);
+eq('find . -h', null);
+// Bundled short flags are NOT the help flag and must keep rewriting.
+eq('ls -lh', 'rtk ls -lh');
+eq('grep -rh needle .', 'rtk grep -rh needle .');
+eq('grep -nh needle a.txt b.txt', 'rtk grep -nh needle a.txt b.txt');
+// -h inside a word (a path, a pattern) is not a flag.
+eq('cat foo-h.txt', 'rtk read foo-h.txt');
+eq('grep needle a-h.txt', 'rtk grep needle a-h.txt');
 
 console.log(`\nrtk-safe.test: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
