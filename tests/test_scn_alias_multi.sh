@@ -24,7 +24,10 @@ SB="$(sandbox)"; RC="$SB/.bashrc"; touch "$RC"
 mkdir -p "$SB/.claude-aka" "$SB/.claude-work" "$SB/.claude-play"
 
 # Run install.sh --alias for <dir> <name>; rc-file resolution follows SHELL.
-mkalias() { CT_CONFIG_DIR="$1" CT_ALIAS="$2" SHELL=/bin/bash HOME="$SB" \
+# Hermetic PATH (install_path): the installer refuses a launcher name that is
+# already a PATH command (e.g. a real ai-tc `aka` on the operator's machine).
+IPATH="$(install_path)"
+mkalias() { PATH="$IPATH" CT_CONFIG_DIR="$1" CT_ALIAS="$2" SHELL=/bin/bash HOME="$SB" \
             bash "$INSTALL" --alias >"$SB/log" 2>&1; }
 blocks_for() { grep -c "managed: $1 >>>" "$RC" 2>/dev/null || true; }
 
@@ -62,7 +65,7 @@ assert_ok "work → .claude-work" bash -c "grep -A1 'managed: work >>>' '$RC' | 
 # non-zero so the agent picks another name.
 mkdir -p "$SB/.claude-other"
 printf 'alias taken=%s\n' "'CLAUDE_CONFIG_DIR=\"$SB/.claude-other\" claude'" >> "$RC"
-CT_CONFIG_DIR="$SB/.claude-aka" CT_ALIAS=taken SHELL=/bin/bash HOME="$SB" \
+PATH="$IPATH" CT_CONFIG_DIR="$SB/.claude-aka" CT_ALIAS=taken SHELL=/bin/bash HOME="$SB" \
   bash "$INSTALL" --alias >"$SB/clog" 2>&1
 assert_eq "--alias exits non-zero on a real collision (caller picks another name)" "1" "$?"
 assert_eq "no managed block written for the colliding name" "0" "$(blocks_for taken)"

@@ -60,8 +60,11 @@ Always let the user choose the folder and alias. Only apply a default if they
 don't specify one:
 
 - **Config folder name**: default `~/.claude-aka`
-- **Alias**: default `aka` (if the user picks a custom folder, suggest the
-  basename minus `.claude-`, e.g. `~/.claude-work` → `work`)
+- **Alias**: default `aka-claude` (if the user picks a custom folder, suggest the
+  basename minus `.claude-`, e.g. `~/.claude-work` → `work`). Bare `aka` is
+  **reserved** for the ai-tc AI Traffic Control CLI: its git-style dispatcher runs
+  `aka claude` by exec'ing `aka-claude` from PATH — exactly this launcher's shim —
+  and `install.sh --alias` refuses a name that is already a command on PATH.
 - **If the folder you'd target already exists as an aka-managed profile, this is an
   UPGRADE, but say so and offer the alternative. Never silently default to
   upgrade-in-place.** A profile is aka-managed if it carries a
@@ -294,6 +297,10 @@ the user's go-ahead.
 - Every hook path resolves inside the new dir and is executable; run each hook
   once with a sample tool-call JSON and confirm sensible exit codes.
 - The alias is present in the rc; `.claude.json` has `oauthAccount`.
+- The launcher shim exists and is executable at `<cfg>/bin/<name>`, and the
+  managed rc block carries the guarded `PATH` export for `<cfg>/bin` — unless the
+  profile path contains a `:`, which cannot be expressed as a `PATH` entry; the
+  installer then writes the alias and shim only, and says so.
 - Summarize what was migrated, what was added, the auth outcome, and any
   edge cases you handled or flagged. Tell the user to open a new shell and run
   the alias.

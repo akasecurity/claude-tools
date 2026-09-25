@@ -20,12 +20,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 echo "test_scn_alias_delete:"
 
 INSTALL="$REPO_ROOT/install.sh"
+# Hermetic PATH: the installer refuses a launcher name that is already a PATH
+# command (e.g. a real ai-tc `aka` on the operator's machine), so alias-creating
+# runs must not see the operator's full PATH.
+IPATH="$(install_path)"
 
 # Helper: fresh sandbox + create one alias. Sets SB (sandbox $HOME) and RC (the
 # rc detect_shell_rc selects under SHELL=/bin/bash — .bashrc, which we pre-create).
 mk_alias() {
   SB="$(sandbox)"; export HOME="$SB"; RC="$SB/.bashrc"; touch "$RC"
-  CT_CONFIG_DIR="$SB/$1" CT_ALIAS="$2" SHELL=/bin/bash HOME="$SB" \
+  PATH="$IPATH" CT_CONFIG_DIR="$SB/$1" CT_ALIAS="$2" SHELL=/bin/bash HOME="$SB" \
     bash "$INSTALL" --alias --no-auth-inherit >"$SB/log" 2>&1
 }
 
@@ -66,14 +70,14 @@ mk_alias ".claude-aka" "aka"
 CT_CONFIG_DIR="$SB/.claude-aka" CT_ALIAS="aka" SHELL=/bin/bash HOME="$SB" \
   bash "$INSTALL" --delete-alias >/dev/null 2>&1
 assert_ngrep "F: old alias gone"  "alias aka=" "$RC"
-CT_CONFIG_DIR="$SB/.claude-aka" CT_ALIAS="aka-new" SHELL=/bin/bash HOME="$SB" \
+PATH="$IPATH" CT_CONFIG_DIR="$SB/.claude-aka" CT_ALIAS="aka-new" SHELL=/bin/bash HOME="$SB" \
   bash "$INSTALL" --alias --no-auth-inherit >/dev/null 2>&1
 assert_lit  "F: new alias present" "alias aka-new=" "$RC"
 assert_ngrep "F: old name absent"  "alias aka=" "$RC"
 
 # ── G. multiple-config coexistence: delete one, leave the other ──────────────
 mk_alias ".claude-aka" "aka"
-CT_CONFIG_DIR="$SB/.claude-work" CT_ALIAS="work" SHELL=/bin/bash HOME="$SB" \
+PATH="$IPATH" CT_CONFIG_DIR="$SB/.claude-work" CT_ALIAS="work" SHELL=/bin/bash HOME="$SB" \
   bash "$INSTALL" --alias --no-auth-inherit >/dev/null 2>&1
 CT_CONFIG_DIR="$SB/.claude-aka" CT_ALIAS="aka" SHELL=/bin/bash HOME="$SB" \
   bash "$INSTALL" --delete-alias >/dev/null 2>&1
@@ -85,7 +89,7 @@ assert_lit   "G: work block intact" "alias work=" "$RC"
 mk_alias ".claude-aka" "aka"
 # Manually write an aka2 block for a different profile (simulates collision-renaming).
 SB2="$(sandbox)"; export HOME="$SB2"; RC2="$SB2/.bashrc"; touch "$RC2"
-CT_CONFIG_DIR="$SB2/.claude-work" CT_ALIAS="aka2" SHELL=/bin/bash HOME="$SB2" \
+PATH="$IPATH" CT_CONFIG_DIR="$SB2/.claude-work" CT_ALIAS="aka2" SHELL=/bin/bash HOME="$SB2" \
   bash "$INSTALL" --alias --no-auth-inherit >/dev/null 2>&1
 # Merge aka2 block from SB2 into SB's rc.
 cat "$RC2" >> "$RC"; export HOME="$SB"

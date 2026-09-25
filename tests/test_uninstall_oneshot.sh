@@ -15,10 +15,13 @@ UNINSTALL="$REPO_ROOT/uninstall.sh"
 # ── precision: remove only the target's block + dir ──────────────────────────
 SB="$(sandbox)"
 mkdir -p "$SB/.claude-aka/hooks" "$SB/.claude-work"
+# The target's block carries the CURRENT two-line launcher shape (alias + guarded
+# PATH export) — prune_blocks must drop the WHOLE block, PATH line included.
 cat > "$SB/.bashrc" <<EOF
 alias ll='ls -la'
 # >>> aka-claude-tools managed: aka >>>
 alias aka='CLAUDE_CONFIG_DIR="$SB/.claude-aka" claude'
+case ":\$PATH:" in *":$SB/.claude-aka/bin:"*) ;; *) export PATH="$SB/.claude-aka/bin:\$PATH" ;; esac
 # <<< aka-claude-tools managed: aka <<<
 # >>> aka-claude-tools managed: work >>>
 alias work='CLAUDE_CONFIG_DIR="$SB/.claude-work" claude'
@@ -29,6 +32,7 @@ assert_eq  "exits 0"                         "0" "$?"
 [ -d "$SB/.claude-aka" ] && fail "target profile dir removed" "still present" || pass "target profile dir removed"
 assert_file "other profile (.claude-work) kept"   "$SB/.claude-work"
 assert_nlit "target alias block removed"     "managed: aka"  "$SB/.bashrc"
+assert_nlit "target block's PATH line removed with it" ".claude-aka/bin" "$SB/.bashrc"
 assert_lit  "other profile's block kept"     "managed: work" "$SB/.bashrc"
 assert_lit  "user's own alias kept"          "alias ll="     "$SB/.bashrc"
 
