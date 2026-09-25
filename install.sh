@@ -1119,10 +1119,12 @@ apply_additions() {
   fi
   if is_selected statusline "$_sel_ids" && aitc_present "$config_dir"; then
     # ai-tc provides its own statusline (coexistencePolicy().statusline is false when
-    # present) — installing the kit's on top would fight it for the slot. The stash
-    # guard below (4d-pre1d) mirrors this same aitc_present check, so a pre-existing
-    # user statusLine is neither stashed nor pruned when we skip here.
-    ok "ai-tc detected; skipping the kit status line (ai-tc provides its own)"
+    # present) — installing the kit's on top would fight it for the slot. Silent here:
+    # whether there's anything to say (a still-installed kit statusLine from BEFORE
+    # ai-tc showed up needs relinquishing, vs. nothing to do) depends on the ON-DISK
+    # settings.json, which isn't read until 4d-pre1d below — that section owns both
+    # the message and the relinquish action, reusing this same aitc_present check.
+    :
   elif is_selected statusline "$_sel_ids"; then
     # bun is guaranteed present here — the hard-dependency gate above aborts the install
     # if statusline is selected without bun (the .ts can't degrade-run like the old .sh).
@@ -1261,20 +1263,36 @@ apply_additions() {
     [ "$_changed" = "1" ] && ok "Uninstalled '${_uid}' — removed its files and settings entries"
   done
 
-  # 4d-pre1d. Preserve a user's existing statusLine when selecting the statusline addition.
-  # The kit's statusLine is a singleton object the merge OVERWRITES (no safe union), so a
-  # plain install would silently lose a statusLine the user already had. Stash a NON-kit
-  # prior value once — prune_statusline restores it verbatim if the addition is later
-  # deselected. Idempotency guard: only stash when the current statusLine is the user's
-  # (command does NOT END with our quoted "<shq(config_dir)>/hooks/statusline.{sh,ts}" tail)
-  # AND nothing is stashed yet, so a re-apply can never overwrite the saved original with the
-  # kit value. The quoted full-path endswith here MUST match prune_statusline's anchor
-  # exactly (so a kit .sh registration on a pre-port profile in THIS dir is recognised as the
-  # kit's, not stashed as the user's; and a user statusLine ending in /hooks/statusline.{sh,
-  # ts} in a DIFFERENT dir — or passing the path as DATA — IS correctly seen as the user's
-  # and stashed). The stem is derived from the SAME manifest statusLine path that
-  # prune_addition_from_settings uses, so the manifest stays the single source of truth and
-  # stash and prune can't disagree even if that path is later moved.
+  # 4d-pre1d. Reconcile the statusLine slot with the current ai-tc state, now that
+  # $existing (the on-disk settings.json) is loaded — the 4b build step above can't do
+  # this itself, since it runs BEFORE $existing is read.
+  #
+  # Two things share this section because they both hinge on the SAME question — does
+  # $existing's .statusLine belong to the kit? — decided by the SAME anchor
+  # prune_statusline uses (command ends with the quoted "<config_dir>/hooks/
+  # statusline.{sh,ts}" tail, portable $HOME form or legacy absolute form):
+  #
+  #   1. FRESH install (ai-tc absent): preserve a user's existing statusLine before the
+  #      merge overwrites it. The kit's statusLine is a singleton object the merge
+  #      OVERWRITES (no safe union), so a plain install would silently lose a
+  #      statusLine the user already had. Stash a NON-kit prior value once —
+  #      prune_statusline restores it verbatim if the addition is later deselected (or,
+  #      per #2, if ai-tc shows up). Idempotency guard: only stash when nothing is
+  #      stashed yet, so a re-apply never overwrites the saved original with the kit
+  #      value.
+  #   2. UPGRADE path (ai-tc now present, and $existing.statusLine is STILL the kit's
+  #      own from a run before ai-tc was added): relinquish it exactly as deselecting
+  #      'statusline' would — remove the placed hook file via the SAME
+  #      addition_owned_paths list the deselect loop (4d-pre, above) uses, then hand
+  #      the settings prune to prune_addition_from_settings (which calls
+  #      prune_statusline, and already knows restore-a-stash vs. just-delete) — no
+  #      restore-vs-remove logic is duplicated here. If $existing.statusLine is
+  #      ALREADY not the kit's own (absent, or the user's real one that was never
+  #      overwritten), there's nothing to relinquish — just say so.
+  #
+  # The stem is derived from the SAME manifest statusLine path that
+  # prune_addition_from_settings uses, so the manifest stays the single source of truth
+  # and stash/relinquish/prune can't disagree even if that path is later moved.
   local _slrel; _slrel="$(jq -r '.additions[] | select(.id=="statusline") | .statusLine // "hooks/statusline.ts"' "$CONFIG_SRC/additions.json")"
   # PORTABLE form ($HOME'<dir>'/…) the registration now writes, plus the LEGACY absolute
   # form (<shq(config_dir)>/…) a pre-portability profile carries — match EITHER so the
@@ -1282,20 +1300,38 @@ apply_additions() {
   # flipped the registration to $HOME (which would wrongly stash it as _aka_prior).
   local _slstem;   _slstem="$(cfg_token "$config_dir")/${_slrel%.*}"
   local _sllegacy; _sllegacy="$(shq "$config_dir")/${_slrel%.*}"
-  # Skip the stash entirely when ai-tc is present for this profile: the build step
-  # above (4b) never wrote a kit statusLine into $add in that case, so $e * $a leaves
-  # the user's existing .statusLine exactly as-is — stashing it here would plant a
-  # spurious _aka_prior_statusLine even though nothing was overwritten. Same
-  # aitc_present("$config_dir") check as the write-skip above, so the two branches
-  # can't disagree about whether the kit is claiming the statusLine slot.
-  if is_selected statusline "$_sel_ids" && ! aitc_present "$config_dir" && [ "$existing" != "{}" ]; then
-    if printf '%s' "$existing" | jq -e --arg stem "$_slstem" --arg legacy "$_sllegacy" '
-          (.statusLine|type)=="object"
-          and ((.statusLine.command) as $c
-               | (if ($c|type)=="array" then ($c|join(" ")) else ($c // "") end)
-               | ( endswith($stem + ".sh")   or endswith($stem + ".ts")
-                   or endswith($legacy + ".sh") or endswith($legacy + ".ts") ) | not)
-          and (has("_aka_prior_statusLine")|not)' >/dev/null 2>&1; then
+  if is_selected statusline "$_sel_ids"; then
+    # Classify $existing.statusLine ONCE: present at all, whether it's the kit's own,
+    # and whether a prior-value stash already exists — every branch below reads these
+    # instead of re-deriving the same jq predicate three different ways.
+    local _sl_present=0 _sl_is_kit=0 _sl_has_stash=0
+    if [ "$existing" != "{}" ]; then
+      printf '%s' "$existing" | jq -e '(.statusLine|type)=="object"' >/dev/null 2>&1 && _sl_present=1
+      if [ "$_sl_present" = "1" ]; then
+        printf '%s' "$existing" | jq -e --arg stem "$_slstem" --arg legacy "$_sllegacy" '
+              (.statusLine.command) as $c
+              | (if ($c|type)=="array" then ($c|join(" ")) else ($c // "") end)
+              | ( endswith($stem + ".sh")   or endswith($stem + ".ts")
+                  or endswith($legacy + ".sh") or endswith($legacy + ".ts") )' >/dev/null 2>&1 && _sl_is_kit=1
+      fi
+      printf '%s' "$existing" | jq -e 'has("_aka_prior_statusLine")' >/dev/null 2>&1 && _sl_has_stash=1
+    fi
+    if aitc_present "$config_dir"; then
+      if [ "$_sl_is_kit" = "1" ]; then
+        local _p
+        while IFS= read -r _p; do
+          [ -n "$_p" ] && [ -e "$_p" ] && rm -rf "$_p"
+        done < <(addition_owned_paths statusline "$config_dir")
+        existing="$(printf '%s' "$existing" | prune_addition_from_settings statusline "$config_dir")"
+        if [ "$_sl_has_stash" = "1" ]; then
+          ok "ai-tc detected; removed the kit status line (restored your previous one)"
+        else
+          ok "ai-tc detected; removed the kit status line (no previous one to restore)"
+        fi
+      else
+        ok "ai-tc detected; skipping the kit status line (ai-tc provides its own)"
+      fi
+    elif [ "$_sl_present" = "1" ] && [ "$_sl_is_kit" = "0" ] && [ "$_sl_has_stash" = "0" ]; then
       warn "Replacing your existing statusLine with the kit's — your previous one is saved and restored if you later deselect 'statusline'."
       existing="$(printf '%s' "$existing" | jq '._aka_prior_statusLine = .statusLine')"
     fi
