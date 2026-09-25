@@ -7,4 +7,17 @@ while [ -L "$_self" ]; do
   _self="$(readlink "$_self")"
   [[ "$_self" == /* ]] || _self="$_dir/$_self"
 done
-exec "$(cd "$(dirname "$_self")/.." && pwd)/install.sh" "$@"
+pkg_dir="$(cd "$(dirname "$_self")/.." && pwd)"
+
+# Prefer a system bun; otherwise use the one npm installed alongside this package
+# ("dependencies" carries a pinned bun, so `npm install` always pulls it in).
+# Prepending its dir to PATH makes `command -v bun` inside install.sh resolve to
+# it, so command-guard/leak-guard/statusline/rtk-safe get registered with that
+# absolute path instead of aborting on a missing system bun.
+if ! command -v bun >/dev/null 2>&1; then
+  for d in "$pkg_dir/node_modules/.bin" "$pkg_dir/../../.bin"; do
+    [ -x "$d/bun" ] && { PATH="$d:$PATH"; export PATH; break; }
+  done
+fi
+
+exec "$pkg_dir/install.sh" "$@"

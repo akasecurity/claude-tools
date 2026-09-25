@@ -61,6 +61,11 @@ brew install akasecurity/tap/aka-claude-tools
 aka-claude-tools
 ```
 
+The npm package brings its own `bun` as a dependency, so command-guard/leak-guard/statusline/rtk-safe
+work even with no system `bun` on PATH. If npm's install-script policy blocks it (e.g. `npm i -g`
+under npm 12's script restrictions prints a warning and skips it), the installer falls back to its
+normal interactive bun offer.
+
 **Or clone and run:**
 
 ```bash
