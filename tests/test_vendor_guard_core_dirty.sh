@@ -14,7 +14,7 @@ SB="$(sandbox)"
 
 # ---- fake guard-core checkout: minimal layout the vendor script needs ----
 FAKE="$SB/fake-guard-core"
-mkdir -p "$FAKE/scripts" "$FAKE/src" "$FAKE/dist"
+mkdir -p "$FAKE/scripts" "$FAKE/src" "$FAKE/dist" "$FAKE/fixtures"
 cat > "$FAKE/scripts/build.ts" <<'EOF'
 // Stub: reports "up to date" unconditionally, exactly like the real bug — the
 // freshness check alone can't see an uncommitted working-tree edit.
@@ -25,6 +25,7 @@ echo 'export const marker = 1;' > "$FAKE/src/index.ts"
 echo '// fake guard-core.js' > "$FAKE/dist/guard-core.js"
 echo '// fake guard-core.d.ts' > "$FAKE/dist/guard-core.d.ts"
 printf '{"version":"9.9.9","sha256":"deadbeef","dtsSha256":"deadbeef"}' > "$FAKE/dist/guard-core.lock.json"
+echo '[]' > "$FAKE/fixtures/conformance.json"
 
 git -C "$FAKE" init -q -b main
 git -C "$FAKE" -c user.email=test@example.com -c user.name=test add -A

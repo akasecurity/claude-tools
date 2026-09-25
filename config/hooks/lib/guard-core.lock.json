@@ -2,5 +2,6 @@
   "version": "0.2.1",
   "sha256": "0b9e2cc7fc9085f0143a338fc448ccdda7673bd6a698d344ac153c06444297a6",
   "dtsSha256": "35e459db1e668417f5cd7d84adc5c31e3a3d2c9c6a67db7ec6880b0c72a5f43e",
-  "source": "1255b4ac733744cf3a4223f0f0eeb8d5c1a33ec1"
+  "source": "1255b4ac733744cf3a4223f0f0eeb8d5c1a33ec1",
+  "fixturesSha256": "4b581713a4fe67dcb3d95e62b57840f2e615727e52f8fc4a26fc1bf50f805d18"
 }
