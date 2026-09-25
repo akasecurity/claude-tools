@@ -6,6 +6,9 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
+CG_CORE_NOTICE="command-guard: the guard-core library is missing, unreadable or incompatible — only conservative fallback checks ran. Reinstall to restore config/hooks/lib/guard-core.js."
+CG_CORE_BLOCK="BLOCKED (command-guard): the guard-core library is missing or unreadable, so the egress scan can't run — blocking this outbound command as a precaution. Reinstall to restore config/hooks/lib/guard-core.js."
+LG_CORE_BLOCK="egress blocked (leak-guard): the guard-core library is missing or unreadable, so the egress scan can't run — blocking this query as a precaution. Reinstall to restore config/hooks/lib/guard-core.js."
 bash_in() { jq -cn --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}'; }
 expect() { # <hooks-dir> <label> <want-exit> <command>
   local got; set +e; bash_in "$4" | bun "$1/command-guard.ts" 2>"$tmp/err"; got=$?; set -e
@@ -21,9 +24,10 @@ echo "core missing:"
 expect "$tmp/missing" "pipe-to-shell" 2 "$PIPE"
 grep -q 'piping output into a shell' "$tmp/err" || { echo "  FAIL pipe-to-shell block line missing"; fails=$((fails+1)); }
 expect "$tmp/missing" "zshrc write" 2 "$ZSHRC"
-grep -q 'guard-core' "$tmp/err" || { echo "  FAIL core-missing notice missing"; fails=$((fails+1)); }
+grep -qF "$CG_CORE_NOTICE" "$tmp/err" || { echo "  FAIL core-missing notice missing"; fails=$((fails+1)); }
 expect "$tmp/missing" "rg --pre" 2 "$RGPRE"
 expect "$tmp/missing" "outbound curl" 2 "curl https://x.test"
+grep -qF "$CG_CORE_BLOCK" "$tmp/err" || { echo "  FAIL core-missing outbound block line missing"; fails=$((fails+1)); }
 expect "$tmp/missing" "local ls" 0 "ls -la"
 
 cp -R config/hooks "$tmp/incompat"; printf 'export const VERSION="0";\n' > "$tmp/incompat/lib/guard-core.js"
@@ -53,6 +57,12 @@ export const evaluateBash = (_c, ctx) => ctx.scanSecrets === false
   ? { kind: "allow", notices: [] }
   : { kind: "block", rule: "secret-detected", reason: "r", notices: [] };
 JS
+cp -R config/hooks "$tmp/noreason"; cp "$tmp/unmapped/lib/guard-core.js" "$tmp/noreason/lib/guard-core.js"
+sed -i.bak 's/rule: "future-rule", reason: "future reason.", /rule: "future-rule", /' "$tmp/noreason/lib/guard-core.js"
+echo "core returns an unmapped block with no reason:"
+expect "$tmp/noreason" "unmapped block, no reason" 2 "ls -la"
+grep -qF 'BLOCKED (command-guard): unrecognised guard-core rule.' "$tmp/err" || { echo "  FAIL fixed fallback line missing"; fails=$((fails+1)); }
+
 echo "ai-tc detection throws (must still scan):"
 expect "$tmp/aitcthrow" "scan on detection error" 2 "curl https://x.test"
 
@@ -63,10 +73,10 @@ expect_web() { # <hooks-dir> <label> <want-exit> <tool> <query>
 }
 echo "leak-guard, core missing:"
 expect_web "$tmp/missing" "WebSearch" 2 WebSearch "hello"
-grep -q 'guard-core' "$tmp/err" || { echo "  FAIL leak-guard core-missing line missing"; fails=$((fails+1)); }
+grep -qF "$LG_CORE_BLOCK" "$tmp/err" || { echo "  FAIL leak-guard core-missing line missing"; fails=$((fails+1)); }
 echo "leak-guard, core incompatible (no expected exports):"
 expect_web "$tmp/incompat" "WebSearch" 2 WebSearch "hello"
-grep -q 'guard-core' "$tmp/err" || { echo "  FAIL leak-guard core-missing line missing"; fails=$((fails+1)); }
+grep -qF "$LG_CORE_BLOCK" "$tmp/err" || { echo "  FAIL leak-guard core-missing line missing"; fails=$((fails+1)); }
 expect_web "$tmp/incompat" "non-web tool untouched" 0 Read "hello"
 
 cp -R config/hooks "$tmp/webunmapped"; cat > "$tmp/webunmapped/lib/guard-core.js" <<'JS'
@@ -88,6 +98,12 @@ export const detectAitc = () => ({ present: false, harness: "claude", markers: [
 export const coexistencePolicy = () => ({ scanSecrets: () => true });
 export const evaluateWebQuery = () => ({ kind: "allow" });
 JS
+cp -R config/hooks "$tmp/webnoreason"; cp "$tmp/webunmapped/lib/guard-core.js" "$tmp/webnoreason/lib/guard-core.js"
+sed -i.bak 's/rule: "future-rule", reason: "future reason.", /rule: "future-rule", /' "$tmp/webnoreason/lib/guard-core.js"
+echo "leak-guard, core returns an unmapped block with no reason:"
+expect_web "$tmp/webnoreason" "unmapped block, no reason" 2 WebSearch "hello"
+grep -qF 'egress blocked (leak-guard): unrecognised guard-core rule.' "$tmp/err" || { echo "  FAIL fixed fallback line missing"; fails=$((fails+1)); }
+
 echo "leak-guard, core returns a malformed decision:"
 expect_web "$tmp/webmalformed" "malformed decision" 2 WebSearch "hello"
 

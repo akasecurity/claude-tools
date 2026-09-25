@@ -37,4 +37,20 @@ echo "leak-guard, ai-tc enabled in profile:"
 expect_web "$prof" "WebSearch ghp_ (ai-tc does not hook it)" 2 WebSearch "$GHPQ"
 expect_web "$prof" "WebFetch ghp_ (deferred to ai-tc)" 0 WebFetch "$GHPQ"
 expect_web "$prof" "searxng ghp_ (deferred to ai-tc)" 0 mcp__searxng__searxng_web_search "$GHPQ"
+# ai-tc cached and registered, but not explicitly enabled: it must NOT count, so both
+# guards keep scanning.
+mkprof() { # <dir> — ai-tc in the plugin cache and registry, no settings.json yet
+  mkdir -p "$1/plugins/cache/akasecurity/ai-tc/1"
+  printf '%s' '{"plugins":{"ai-tc@akasecurity":[{}]}}' > "$1/plugins/installed_plugins.json"
+}
+noKey="$tmp/nokey"; mkprof "$noKey"; printf '%s' '{"enabledPlugins":{}}' > "$noKey/settings.json"
+noSettings="$tmp/nosettings"; mkprof "$noSettings"
+corrupt="$tmp/corrupt"; mkprof "$corrupt"; printf '%s' '{"enabledPlugins":' > "$corrupt/settings.json"
+for pair in "key absent:$noKey" "settings.json missing:$noSettings" "settings.json corrupt:$corrupt"; do
+  label="${pair%%:*}"; dir="${pair#*:}"
+  echo "ai-tc not explicitly enabled ($label):"
+  expect_web "$dir" "WebFetch ghp_" 2 WebFetch "$GHPQ"
+  expect_web "$dir" "searxng ghp_" 2 mcp__searxng__searxng_web_search "$GHPQ"
+  expect "$dir" "ghp_ curl" 2 "$GHP"
+done
 [ "$fails" = 0 ] && echo PASS || { echo "FAIL: $fails check(s)"; exit 1; }

@@ -200,7 +200,7 @@ async function main(): Promise<void> {
   }
   if (d.kind === 'block') {
     const msg = BLOCK_MSG[d.rule] as string | undefined;
-    console.error(msg ?? `egress blocked (leak-guard): ${d.reason}`);
+    console.error(msg ?? `egress blocked (leak-guard): ${typeof d.reason === 'string' ? d.reason : 'unrecognised guard-core rule.'}`);
     process.exit(2);
   }
   process.exit(0);

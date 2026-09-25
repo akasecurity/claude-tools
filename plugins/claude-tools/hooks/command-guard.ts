@@ -186,7 +186,7 @@ async function main(): Promise<void> {
   }
   if (d.kind === 'block') {
     const msg = BLOCK_MSG[d.rule] as ((detail?: string) => string) | undefined;
-    console.error(P + (msg ? msg(d.detail) : `🚨 BLOCKED (command-guard): ${d.reason}`));
+    console.error(P + (msg ? msg(d.detail) : `🚨 BLOCKED (command-guard): ${typeof d.reason === 'string' ? d.reason : 'unrecognised guard-core rule.'}`));
     process.exit(2);
   }
   process.exit(0);
