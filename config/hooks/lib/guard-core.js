@@ -1,6 +1,6 @@
 // @bun
 // package.json
-var version = "0.2.0";
+var version = "0.2.1";
 // src/shell/tokenize.ts
 var TOKENIZE_MAX_DEPTH = 40;
 function extractParen(s, from) {
@@ -838,7 +838,7 @@ function enabledClaudePlugins(root, readFile) {
     return new Set;
   const settings = readJson(readFile, join(root, "settings.json"));
   const enabled = isObject(settings) && isObject(settings.enabledPlugins) ? settings.enabledPlugins : {};
-  return new Set(Object.keys(registry.plugins).filter((k) => enabled[k] !== false));
+  return new Set(Object.keys(registry.plugins).filter((k) => enabled[k] === true));
 }
 function detectAitc(harness, opts) {
   const exists = opts.exists ?? existsSync;

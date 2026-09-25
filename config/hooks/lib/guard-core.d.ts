@@ -92,8 +92,9 @@ export interface AitcStatus {
  *
  * - claude: a plugin dir under `<root>/plugins/cache/<marketplace>/<name>` where `<name>` is
  *   `ai-tc` (any marketplace) or `aka` (marketplace `akasecurity` or `ai-tc`), AND the key
- *   `<name>@<marketplace>` is listed in `<root>/plugins/installed_plugins.json` and not set to
- *   `false` in `<root>/settings.json` `enabledPlugins`. A cache dir alone does not count.
+ *   `<name>@<marketplace>` is listed in `<root>/plugins/installed_plugins.json` and set to `true`
+ *   (not merely present, and not absent, `false`, or any other value) in `<root>/settings.json`
+ *   `enabledPlugins`. A cache dir alone does not count.
  * - codex: `<root>/plugins/cache/<marketplace>/aka-codex` exists.
  * - antigravity: `<home>/.gemini/config/plugins/aka-antigravity` exists.
  * - grok: always absent.
