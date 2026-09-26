@@ -270,4 +270,26 @@ assert_ok "(i) trusted-bootstrap.json keeps its previous rules" \
 assert_ok "(i) mcp-policy.json still present after the bootstrap failure" \
   bash -c "jq -e '.deny == [\"bad\"]' '$MP' >/dev/null"
 
+# ── (j) the installer rejects what guard-core's validRule rejects, so a rule the
+#    runtime would silently drop never compiles: `.`/`..` segments, single-label
+#    hosts, and path characters outside [A-Za-z0-9._~-] plus `/`. ──
+for _bad in \
+  "https://get.example.dev/../install/" \
+  "https://get.example.dev/./install/" \
+  "https://get.example.dev/install/../" \
+  "https://localhost/install/" \
+  "https://get.example.dev/in%20stall/" \
+  "https://get.example.dev/install+x/" \
+  "https://get.example.dev/a,b/" \
+  "https://get.example.dev/in'st/"; do
+  inst "command-guard" "CT_TRUSTED_BOOTSTRAP_URLS=\"$_bad\""
+  assert_ok "(j) $_bad aborts" bash -c "[ $RC -ne 0 ]"
+  assert_grep "(j) $_bad: dies naming CT_TRUSTED_BOOTSTRAP_URLS" 'CT_TRUSTED_BOOTSTRAP_URLS in .* invalid URL' "$SB/log"
+done
+# The accepted shapes still compile (tilde, dots inside a segment, dashes).
+inst "command-guard" 'CT_TRUSTED_BOOTSTRAP_URLS="https://get.example.dev/~user/v1.2_x-y/"'
+assert_ok "(j) a valid multi-segment prefix still compiles" bash -c "[ $RC -eq 0 ]"
+assert_ok "(j) its rule is recorded" \
+  bash -c "jq -e '.rules == [{\"host\":\"get.example.dev\",\"pathPrefix\":\"/~user/v1.2_x-y/\"}]' '$PROFILE/hooks/lib/trusted-bootstrap.json' >/dev/null"
+
 t_summary

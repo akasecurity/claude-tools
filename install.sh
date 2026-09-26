@@ -1147,6 +1147,8 @@ compile_mcp_policy_sidecar() {
 #   - none of ?#{}[]\ or any whitespace anywhere in the URL
 #   - host limited to the portable hostname subset ([A-Za-z0-9.-]+), lowercased for
 #     the sidecar since hostnames are case-insensitive
+#   - and exactly what guard-core's validRule accepts: a host of two or more labels,
+#     path segments of [A-Za-z0-9._~-] only, no `.`/`..` segments
 _bootstrap_url_to_rule() {
   local key="$1" cfg="$2" url="$3"
   case "$url" in
@@ -1175,6 +1177,17 @@ _bootstrap_url_to_rule() {
   esac
   case "$authority" in
     ''|*[!A-Za-z0-9.-]*) die "$key in $cfg has an invalid URL \"$url\" (host has invalid characters)." ;;
+  esac
+  # Mirror guard-core's validRule exactly, so a rule the runtime would silently drop
+  # never compiles: a dotted host of two or more non-empty labels (HOST_RE), a path of
+  # non-empty [A-Za-z0-9._~-] segments each ending in / (PREFIX_RE), and no `.`/`..`
+  # segment (dotSegment).
+  [[ "$authority" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] \
+    || die "$key in $cfg has an invalid URL \"$url\" (host must be a dotted name such as get.example.dev; single-label hosts like localhost are not allowed)."
+  [[ "$path" =~ ^/([A-Za-z0-9._~-]+/)*$ ]] \
+    || die "$key in $cfg has an invalid URL \"$url\" (path may contain only A-Z a-z 0-9 . _ ~ - and /, with no empty segments)."
+  case "/$path/" in
+    */./*|*/../*) die "$key in $cfg has an invalid URL \"$url\" (path must not contain . or .. segments)." ;;
   esac
   local host_lc
   host_lc="$(printf '%s' "$authority" | tr 'A-Z' 'a-z')"
