@@ -48,7 +48,11 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   library, with output unchanged from the previous standalone implementation (pinned by golden
   tests against `tests/fixtures/guard-core-conformance.json`).
 - The npm package now brings `bun` in as a dependency (pinned to 1.4.2), and the installer uses
-  it when no system `bun` is on `PATH`. If that bundled `bun` is later moved or removed (an `npm
+  it when no system `bun` is on `PATH` and the bundled one actually runs. Under npm 12's default
+  script policy its postinstall is blocked (allow it with `--allow-scripts=bun`) and the
+  placeholder left behind is ignored: the installer treats `bun` as missing, so it offers an
+  install interactively and aborts under `--apply` rather than registering a hook that can't
+  block. If that bundled `bun` is later moved or removed (an `npm
   uninstall -g` or an `npm update -g` that relocates the package), the hooks registered against
   its absolute path stop resolving and exit 127 without blocking; `install.sh` now warns once per
   run when a hook is registered against a bundled `bun` so this doesn't fail silently. The plugin

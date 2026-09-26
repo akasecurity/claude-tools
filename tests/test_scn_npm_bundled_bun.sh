@@ -32,8 +32,8 @@
 # any install-scripts allowance npm's own policy needs. If npm itself, or the
 # platform-specific bun postinstall download, can't complete (no network, or a host
 # npm config still blocks the script despite the scoped allowance), this SKIPs with
-# the reason instead of failing — see README's npm section for the documented
-# interactive-bun-offer fallback that covers that case for real users.
+# the reason instead of failing. Case E covers what real users get under npm's
+# default script policy: a non-runnable placeholder bun that must never be used.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 REPO_ROOT="$(pwd)"
@@ -78,6 +78,80 @@ if ! tar -xOzf "$tmp/$tgz" package/package.json | jq -e '.dependencies.bun' >/de
 fi
 
 home="$tmp/home"; mkdir -p "$home"
+
+# ── E: npm's default script policy leaves a NON-runnable bun placeholder ──────
+# Under npm 12 defaults (no allow-scripts entry) bun's postinstall is blocked, so
+# node_modules/.bin/bun is a placeholder that passes `-x` but exits 1 on every run.
+# Neither the bin wrapper nor the installer may treat that as a usable bun: hooks
+# registered on it exit 1 (not 2), so nothing would be blocked. Contract:
+#   E1. the bin wrapper does NOT put that dir on PATH;
+#   E2. `--apply` with command-guard selected ABORTS with the missing-bun message
+#       and registers no hook at all.
+# If this npm/environment still runs the script (npm < 12, or a host allowance), the
+# placeholder is simulated by replacing .bin/bun in the temp prefix with a stub that
+# exits 1, so the contract is exercised either way.
+ns_npmrc="$tmp/npmrc-noscripts"; : > "$ns_npmrc"
+ns_prefix="$tmp/prefix-noscripts"
+ns_log="$tmp/install-noscripts.log"
+if HOME="$home" PATH="$nobun_bin" npm install -g --userconfig "$ns_npmrc" \
+     --prefix "$ns_prefix" "$tmp/$tgz" >"$ns_log" 2>&1; then
+  ns_pkg="$ns_prefix/lib/node_modules/@akasecurity/claude-tools"
+  ns_bun="$ns_pkg/node_modules/.bin/bun"
+  if [ -x "$ns_bun" ] && "$ns_bun" --version >/dev/null 2>&1; then
+    echo "  note: bun's postinstall ran without an allowance; simulating the placeholder with a failing stub"
+    rm -f "$ns_bun"
+    printf '#!/bin/sh\necho "placeholder bun: postinstall was not run" >&2\nexit 1\n' > "$ns_bun"
+    chmod +x "$ns_bun"
+  elif [ ! -e "$ns_bun" ]; then
+    printf '#!/bin/sh\necho "placeholder bun: postinstall was not run" >&2\nexit 1\n' > "$ns_bun"
+    chmod +x "$ns_bun"
+  fi
+  if ! [ -x "$ns_bun" ] || "$ns_bun" --version >/dev/null 2>&1; then
+    echo "FAIL: could not set up a non-runnable bun placeholder at $ns_bun"
+    exit 1
+  fi
+
+  # E1: run a copy of the shipped bin wrapper against a fake package root whose
+  # install.sh just reports PATH, with the placeholder bun as its bundled bun.
+  fake="$tmp/fakepkg"; mkdir -p "$fake/bin" "$fake/node_modules/.bin"
+  cp "$ns_pkg/bin/aka-claude-tools" "$fake/bin/aka-claude-tools"
+  ln -s "$ns_bun" "$fake/node_modules/.bin/bun"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$PATH"\n' > "$fake/install.sh"
+  chmod +x "$fake/bin/aka-claude-tools" "$fake/install.sh"
+  wrapped_path="$(PATH="$nobun_bin" bash "$fake/bin/aka-claude-tools")"
+  case ":$wrapped_path:" in
+    *":$fake/node_modules/.bin:"*)
+      echo "FAIL: bin wrapper put a non-runnable bundled bun on PATH ($wrapped_path)"; exit 1 ;;
+  esac
+  echo "  PASS: bin wrapper does not put a non-runnable bundled bun on PATH"
+
+  # E2: the real installed wrapper, --apply, command-guard selected → abort, no hook.
+  ns_dir="$tmp/ctconfig-noscripts"
+  ns_home="$tmp/agent-home-noscripts"; mkdir -p "$ns_home"
+  ns_apply_log="$tmp/apply-noscripts.log"
+  if CT_CONFIG_DIR="$ns_dir" CT_ADDITIONS="command-guard" HOME="$ns_home" PATH="$nobun_bin" \
+       bash "$ns_pkg/bin/aka-claude-tools" --apply --no-auth-inherit >"$ns_apply_log" 2>&1; then
+    echo "FAIL: --apply succeeded with only a non-runnable bundled bun available"
+    cat "$ns_apply_log"
+    exit 1
+  fi
+  if ! grep -qiE 'bun.*(not found|required)' "$ns_apply_log"; then
+    echo "FAIL: --apply with a non-runnable bun did not report the missing-bun abort"
+    cat "$ns_apply_log"
+    exit 1
+  fi
+  if [ -f "$ns_dir/settings.json" ] && \
+     jq -e '[.hooks // {} | .[]?[]?.hooks[]?.command] | length > 0' "$ns_dir/settings.json" >/dev/null 2>&1; then
+    echo "FAIL: --apply registered hooks on a non-runnable bun"
+    cat "$ns_dir/settings.json"
+    exit 1
+  fi
+  echo "  PASS: --apply aborts with the missing-bun message and registers no hook"
+else
+  echo "  SKIP (E): npm install without a script allowance failed (network?)"
+  tail -5 "$ns_log"
+fi
+
 npmrc="$tmp/npmrc"
 # Scoped to THIS install only, via --userconfig, never ~/.npmrc: some npm installs
 # (npm 12's install-scripts policy) block a dependency's postinstall (bun's platform-

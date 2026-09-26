@@ -14,9 +14,13 @@ pkg_dir="$(cd "$(dirname "$_self")/.." && pwd)"
 # Prepending its dir to PATH makes `command -v bun` inside install.sh resolve to
 # it, so command-guard/leak-guard/statusline/rtk-safe get registered with that
 # absolute path instead of aborting on a missing system bun.
-if ! command -v bun >/dev/null 2>&1; then
+# A candidate counts only if it actually runs: when npm's install-script policy
+# blocks bun's postinstall (npm 12 default), .bin/bun is a placeholder that is
+# executable but exits 1. It is skipped, so install.sh sees no usable bun and
+# makes its normal interactive offer, or aborts when bun is required.
+if ! bun --version >/dev/null 2>&1; then
   for d in "$pkg_dir/node_modules/.bin" "$pkg_dir/../../.bin"; do
-    [ -x "$d/bun" ] && { PATH="$d:$PATH"; export PATH; break; }
+    [ -x "$d/bun" ] && "$d/bun" --version >/dev/null 2>&1 && { PATH="$d:$PATH"; export PATH; break; }
   done
 fi
 

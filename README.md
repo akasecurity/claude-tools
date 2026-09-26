@@ -64,9 +64,12 @@ aka-claude-tools
 ```
 
 The npm package brings its own `bun` as a dependency, so command-guard/leak-guard/statusline/rtk-safe
-work even with no system `bun` on PATH. If npm's install-script policy blocks it (e.g. `npm i -g`
-under npm 12's script restrictions prints a warning and skips it), the installer falls back to its
-normal interactive bun offer. **If your hooks ended up registered with that bundled bun** (the
+work even with no system `bun` on PATH. That bundled `bun` needs its postinstall script, which
+npm 12 blocks by default (`npm i -g` prints an install-scripts warning); allow it with
+`npm i -g --allow-scripts=bun @akasecurity/claude-tools`. When the bundled `bun` can't run, the
+installer ignores it and treats `bun` as missing: it offers to install `bun` interactively, and
+under `--apply` or a non-interactive run it aborts before registering any hook that needs `bun`.
+**If your hooks ended up registered with that bundled bun** (the
 installer warns you when this happens), run this kit's uninstall before removing or upgrading the
 `@akasecurity/claude-tools` package, or install a system `bun` and re-run the installer first —
 otherwise `npm uninstall -g` / `npm update -g` can leave the hooks pointing at a path that no longer

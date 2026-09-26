@@ -839,7 +839,7 @@ setup_alias() {
 # must never block the install or silently swallow the kit's own statusline/offer.
 aitc_present() {
   local core="$CONFIG_SRC/hooks/lib/guard-core.js" d
-  command -v bun >/dev/null 2>&1 || return 1
+  dep_usable bun || return 1
   if [ -n "${1:-}" ]; then
     [ "$(bun "$REPO_DIR/shared/lib/aitc-status.ts" "$core" "$1" 2>/dev/null)" = present ]; return
   fi
@@ -1000,7 +1000,7 @@ compile_org_sidecar() {
     [ "$_v" -gt 1 ] && die "CT_EGRESS_PATTERNS in $cfg is not a valid POSIX ERE (grep -E rejects it). Fix it, then re-run."
     # And as a JS RegExp, when bun is present (the JS consumer). The portable subset is
     # JS-valid by construction, so this only catches malformed patterns.
-    if command -v bun >/dev/null 2>&1; then
+    if dep_usable bun; then
       bun -e 'try{new RegExp(process.argv[1])}catch(e){console.error(String(e));process.exit(1)}' "$pat" 2>/dev/null \
         || die "CT_EGRESS_PATTERNS in $cfg is not a valid JavaScript RegExp (command-guard could not compile it). Fix it, then re-run."
     fi
