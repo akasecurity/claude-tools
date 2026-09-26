@@ -70,6 +70,15 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   `.claude/settings.local.json` turns the deferral off for sessions in that project.
 
 ### Changed
+- **Upgrade: `mcp-guard` turns on for existing installs.** It is a recommended addition, so an
+  interactive installer re-run defaults it to Y and `--defaults` selects it; an explicit
+  `CT_ADDITIONS` list installs it only if the list names it. Plugin users get it with the
+  plugin update. What changes once it is on:
+  - It fails closed: if the guard itself errors (guard-core missing or incompatible,
+    unparseable hook input, an unexpected exception), the MCP call is blocked.
+  - It blocks MCP tool inputs it cannot fully scan: more than 1,000,000 characters of string
+    content (about 1 MB), more than 200,000 values, or nesting deeper than 32 levels.
+  - Every MCP tool call starts one `bun` process for the hook.
 - **Default launcher name is `claude-aka`** (was `aka`) for `~/.claude-aka` and the fallback
   derivation. Bare `aka` and every `aka-*` name belong to the ai-tc AI Traffic Control CLI.
   ai-tc's `aka claude` still runs `aka-claude`, so it keeps working on a profile migrated from
