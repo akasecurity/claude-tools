@@ -376,27 +376,23 @@ prune_perms_env() {
         else . end )'
 }
 
-# prune_sandbox_keys <config_dir>  (settings json on stdin → pruned on stdout)
-# The sandbox addition's payload isn't a static file (denyRead is COMPUTED at install
-# time from settings.base.json — see apply_additions), so it can't be diffed against a
-# fixed payload file the way prune_perms_env diffs telemetry-off/error-reporting-off/etc.
-# Instead, remove EXACTLY the dotted key paths apply_additions recorded in the meta file
-# when it added them (meta key `sandbox_keys`, space-separated, e.g. "sandbox.enabled
-# sandbox.filesystem.denyRead") — so a sibling key under .sandbox the USER set themselves
-# (sandbox.network.allowLocalBinding, say) is never touched, on deselect or on a
-# skipped-platform re-run alike. No-op when nothing was ever recorded (never installed,
-# or installed then skipped on this platform). jq's del() is a no-op on an absent path
-# (no error), so a partial/never-populated .sandbox tree is safe to walk. Cleans up the
-# now-empty .sandbox.filesystem and .sandbox objects only when the LAST key under them
-# is gone, so a surviving sibling user key keeps its parent object.
-prune_sandbox_keys() {
-  local config_dir="$1" keys k prog="."
-  keys="$(meta_get "$config_dir" sandbox_keys)"
-  [ -z "$keys" ] && { cat; return; }
-  for k in $keys; do prog="${prog} | del(.${k})"; done
-  jq "${prog}
-    | (if (.sandbox.filesystem // {}) == {} then del(.sandbox.filesystem) else . end)
-    | (if (.sandbox // {}) == {} then del(.sandbox) else . end)"
+# prune_sandbox  (settings json on stdin → pruned on stdout)
+# sandbox.enabled is a SINGLETON value the merge OVERWRITES (like .statusLine), so
+# deselecting it can't just delete the key — that would clobber a value the user had
+# BEFORE this addition ever touched their profile. Mirrors the statusLine stash/restore
+# pattern (see the reconcile step in apply_additions, which stashes the pre-install value
+# into the hidden `_aka_prior_sandbox_enabled` marker the first time this addition is
+# selected): restore that marker if present, else the key was never anything but the
+# kit's own, so just remove it. Cleans up the now-empty .sandbox object only when nothing
+# else is left under it, so a sibling key the user set themselves
+# (sandbox.network.allowLocalBinding, say) survives untouched.
+prune_sandbox() {
+  jq '
+    if has("_aka_prior_sandbox_enabled")
+    then .sandbox.enabled = ._aka_prior_sandbox_enabled | del(._aka_prior_sandbox_enabled)
+    else del(.sandbox.enabled) end
+    | (if (.sandbox // {}) == {} then del(.sandbox) else . end)
+  '
 }
 
 # addition_owned_paths <id> <config_dir> → echo the files/dirs the addition owns.
@@ -434,7 +430,7 @@ prune_addition_from_settings() {
   # install; prune_statusline only drops the statusLine command, so remove that pinned
   # preference too (it is the only thing the kit writes under .preferences).
   [ "$id" = "statusline" ] && s="$(printf '%s' "$s" | jq 'if (.preferences|type)=="object" then (del(.preferences.location) | (if (.preferences=={}) then del(.preferences) else . end)) else . end')"
-  [ "$id" = "sandbox" ] && s="$(printf '%s' "$s" | prune_sandbox_keys "$config_dir")"
+  [ "$id" = "sandbox" ] && { s="$(printf '%s' "$s" | prune_sandbox)"; meta_set "$config_dir" sandbox_installed 0; }
   [ -n "$setf" ] && [ -f "$CONFIG_SRC/$setf" ] && s="$(printf '%s' "$s" | prune_perms_env "$CONFIG_SRC/$setf")"
   printf '%s' "$s"
 }
@@ -1364,36 +1360,36 @@ apply_additions() {
   is_selected autoupdater-off      "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.autoupdater-off.json")"
   is_selected feedback-survey-off  "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.feedback-survey-off.json")"
 
-  # Opt-in native sandbox (settings-only, like the toggles above, but its payload isn't
-  # static): enables Claude Code's OS-level sandbox and denies reads on the SAME
-  # credential paths secure-settings denies to the Read tool — closing the gap where a
-  # Bash `cat ~/.aws/credentials` bypasses a Read-tool-only deny. denyRead is derived
-  # HERE from settings.base.json's `Read(<path>)` permission-deny rules via jq (map each
-  # to <path>), never duplicated as a second static list, so the two can't drift.
+  # Opt-in native sandbox (settings-only, like the toggles above): flips
+  # sandbox.enabled on. Claude Code's OWN documented sandbox.filesystem.denyRead schema
+  # field says it is "Merged with paths from Read(...) deny permission rules" — i.e. the
+  # runtime already folds settings.base.json's Read(...) credential denies into the
+  # sandbox's effective filesystem denylist on its own, with the correct (permission-
+  # rule) glob resolution. This addition deliberately does NOT also write an explicit
+  # sandbox.filesystem.denyRead: a kit-computed list of the SAME `Read(<path>)` strings
+  # written verbatim into that field would be re-resolved under sandbox.filesystem's own
+  # (different, narrower) path rules — entries with no `/`, `~/` or `./` prefix
+  # (`**/.env`, `**/.env.local`, `**/.env.*.local`) resolve relative to the settings
+  # file root (~/.claude for user settings) instead of matching project-relative, so
+  # they'd silently fail to deny anything real. Enabling the sandbox and leaving denyRead
+  # to Claude Code's own merge gets the credential protection with the semantics that
+  # actually work for those three glob rules.
   # Platform-gated: sandbox-exec ships with macOS (always supported); the Linux
   # backend needs `bwrap` on PATH. CT_UNAME lets tests force the OS check without
   # faking `uname` on PATH. Any other OS, or Linux without bwrap, skips with a notice
   # (soft-skip, never die — this addition is opt-in, so an unsupported host just
-  # doesn't get it rather than aborting the whole install).
+  # doesn't get it rather than aborting the whole install). `_sb_supported` is read
+  # again later (after `existing` is loaded) by the stash/restore reconcile step, so it's
+  # a plain function-local var, not re-derived.
+  local _sb_supported=0
   if is_selected sandbox "$_sel_ids"; then
     local _sb_os; _sb_os="${CT_UNAME:-$(uname -s)}"
-    local _sb_supported=0
     case "$_sb_os" in
       Darwin) _sb_supported=1 ;;
       Linux)  command -v bwrap >/dev/null 2>&1 && _sb_supported=1 ;;
     esac
     if [ "$_sb_supported" = "1" ]; then
-      local _sb_denyread
-      _sb_denyread="$(jq -c '[ (.permissions.deny // [])[]
-          | select(startswith("Read(") and endswith(")"))
-          | .[5:-1] ]' "$CONFIG_SRC/settings.base.json")"
-      add="$(jq -s --argjson dr "$_sb_denyread" \
-        '.[0] * (.[1] | .sandbox.filesystem.denyRead = $dr)' \
-        <(printf '%s' "$add") "$CONFIG_SRC/settings.sandbox.json")"
-      # Record exactly the key paths this addition adds, so deselect can remove
-      # exactly those and leave any OTHER user-set key under .sandbox untouched
-      # (see prune_addition_from_settings's sandbox case).
-      meta_set "$config_dir" sandbox_keys "sandbox.enabled sandbox.filesystem.denyRead"
+      add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.sandbox.json")"
     else
       warn "sandbox: bubblewrap (bwrap) not found; sandbox addition skipped."
     fi
@@ -1733,6 +1729,31 @@ apply_additions() {
       warn "Replacing your existing statusLine with the kit's — your previous one is saved and restored if you later deselect 'statusline'."
       existing="$(printf '%s' "$existing" | jq '._aka_prior_statusLine = .statusLine')"
     fi
+  fi
+
+  # 4d-pre1c. Stash the pre-install value of .sandbox.enabled, now that $existing is
+  # loaded — same singleton-overwrite problem as statusLine above (the merge OVERWRITES
+  # a scalar, never unions it), same fix: stash the user's prior value once, restore it
+  # on deselect (prune_sandbox). Unlike statusLine, a plain boolean carries no fingerprint
+  # to tell "the kit's own true from a re-apply" apart from "the user's own true" by VALUE
+  # alone, so identity is tracked with a meta flag (`sandbox_installed`) instead of
+  # inspecting the value: stash only the FIRST time this addition is ever applied to this
+  # profile (no stash yet AND the meta flag isn't already set), never on a repeat
+  # select — which would otherwise re-stash the kit's own prior write over the genuine
+  # original on every re-apply. Gated on `_sb_supported` (set above): a skipped-platform
+  # run touches nothing here, exactly like it adds nothing to `add`.
+  if is_selected sandbox "$_sel_ids" && [ "$_sb_supported" = "1" ]; then
+    local _sb_has_stash=0 _sb_prev_installed
+    if [ "$existing" != "{}" ]; then
+      printf '%s' "$existing" | jq -e 'has("_aka_prior_sandbox_enabled")' >/dev/null 2>&1 && _sb_has_stash=1
+    fi
+    _sb_prev_installed="$(meta_get "$config_dir" sandbox_installed)"
+    if [ "$_sb_has_stash" = "0" ] && [ "$_sb_prev_installed" != "1" ] \
+       && printf '%s' "$existing" | jq -e '.sandbox.enabled != null' >/dev/null 2>&1; then
+      warn "Replacing your existing sandbox.enabled with the kit's — your previous value is saved and restored if you later deselect 'sandbox'."
+      existing="$(printf '%s' "$existing" | jq '._aka_prior_sandbox_enabled = .sandbox.enabled')"
+    fi
+    meta_set "$config_dir" sandbox_installed 1
   fi
 
   # 4d-pre1a. The shared egress-guard libs (hooks/lib/secret-patterns.json and the
