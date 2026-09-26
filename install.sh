@@ -43,12 +43,15 @@
 #                      login (use when the profile is for a DIFFERENT account).
 #   --apply            DETERMINISTIC ENGINE mode: layer the additions named in
 #                      $CT_ADDITIONS onto $CT_CONFIG_DIR and exit. No prompts, no
-#                      alias, no auth — just the repeatable mechanics (place files,
+#                      new alias, no auth — just the repeatable mechanics (place files,
 #                      union settings onto whatever is already in the dir, reconcile
-#                      retired perms, register hooks). This is the entry point Path A
-#                      (agent-install.md) invokes after it has done the judgment work
-#                      (scan + migrate the user's config); also usable directly for a
-#                      scripted/CI fresh install. Requires CT_CONFIG_DIR + CT_ADDITIONS.
+#                      retired perms, register hooks); it may migrate a legacy
+#                      `aka-claude` launcher to `claude-aka` if one is recorded for
+#                      this profile (see migrate_deprecated_launcher). This is the
+#                      entry point Path A (agent-install.md) invokes after it has done
+#                      the judgment work (scan + migrate the user's config); also
+#                      usable directly for a scripted/CI fresh install. Requires
+#                      CT_CONFIG_DIR + CT_ADDITIONS.
 #   --alias            Create/check the launcher alias for $CT_ALIAS → $CT_CONFIG_DIR
 #                      and exit. install.sh is the SOLE sanctioned writer of your
 #                      shell rc, so the agent invokes THIS rather than editing the rc

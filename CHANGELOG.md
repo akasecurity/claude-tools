@@ -21,27 +21,39 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 - **PATH-visible launcher shim**: alongside the shell alias, the installer now writes an
   executable shim at `<profile>/bin/<name>` and adds a guarded `PATH` export to the managed
   rc block. Scripts, non-interactive shells, and the ai-tc `aka` CLI's git-style external
-  subcommand dispatch (`aka claude` → execs `aka-claude` from PATH) can launch the profile.
+  subcommand dispatch (`aka claude` → execs `claude-aka` from PATH) can launch the profile.
   `--delete-alias` removes the shim with the block (marker-gated — a user file that merely
   shares the name is never deleted), and `uninstall.sh`'s profile removal covers it for free.
 - **PATH-conflict check**: `--alias` refuses (strict) or offers an alternate name
   (interactive) before claiming a launcher name that is already a command on PATH.
   A profile path containing a `:` gets the alias and shim but no `PATH` entry — a
   colon would split it into a relative `PATH` entry — and the installer says so.
+- **Deferral to ai-tc** when it is installed and enabled for the profile: the kit skips
+  secret scanning on tools ai-tc's own hooks, never rewrites those tools, and does not
+  install its status line, so a profile running both never double-scans a secret, never
+  rewrites the same tool call twice, and never shows two status lines. Structural blocks
+  (pipe-to-shell, startup-file write, ripgrep exec) still apply regardless.
 
 ### Changed
-- **Default launcher name is `aka-claude`** (was `aka`) for `~/.claude-aka` and the fallback
-  derivation. Bare `aka` is reserved for the ai-tc AI Traffic Control CLI so `aka claude` can
-  dispatch to this launcher. Basename-derived names (`~/.claude-work` → `work`) are unchanged.
-  Existing profiles keep whatever alias they recorded; re-running does not rename them.
-- **Default launcher name is `claude-aka`** (replaces `aka-claude`). Bare `aka` and every
-  `aka-*` name belong to the ai-tc CLI. A profile whose recorded launcher is `aka-claude` is
-  migrated by `--apply` or an installer re-run: it gets a `claude-aka` launcher, and
-  `aka-claude` becomes a forwarder for one release that prints
-  `aka-claude is deprecated; use claude-aka` to stderr and runs `claude-aka` with the same
-  arguments. A user-owned `aka-claude` (no kit marker) is left alone. `--delete-alias
-  claude-aka` and `uninstall.sh` remove the forwarder too; `--delete-alias aka-claude`
-  removes only the forwarder.
+- **Default launcher name is `claude-aka`** (was `aka`) for `~/.claude-aka` and the fallback
+  derivation. Bare `aka` and every `aka-*` name belong to the ai-tc AI Traffic Control CLI, so
+  `aka claude` dispatches to this launcher. Basename-derived names (`~/.claude-work` → `work`)
+  are unchanged. A profile whose recorded launcher is `aka-claude` is migrated by `--apply` or
+  an installer re-run: it gets a `claude-aka` launcher, and `aka-claude` becomes a forwarder for
+  one release that prints `aka-claude is deprecated; use claude-aka` to stderr and runs
+  `claude-aka` with the same arguments. A user-owned `aka-claude` (no kit marker) is left alone.
+  `--delete-alias claude-aka` and `uninstall.sh` remove the forwarder too; `--delete-alias
+  aka-claude` removes only the forwarder.
+- The guards (`command-guard`, `leak-guard`, `rtk-safe`) now run on the vendored guard-core
+  library, with output unchanged from the previous standalone implementation (pinned by golden
+  tests against `tests/fixtures/guard-core-conformance.json`).
+- The npm package now brings `bun` in as a dependency (pinned to 1.4.2), and the installer uses
+  it when no system `bun` is on `PATH`. If that bundled `bun` is later moved or removed (an `npm
+  uninstall -g` or an `npm update -g` that relocates the package), the hooks registered against
+  its absolute path stop resolving and exit 127 without blocking; `install.sh` now warns once per
+  run when a hook is registered against a bundled `bun` so this doesn't fail silently. The plugin
+  (git-subdir source) can't declare npm dependencies, so its launcher stays fail-open and
+  unchanged: without `bun` it still fails open with the `INACTIVE` notice.
 
 ### Fixed
 - `rtk-safe` restores standalone `grep`/`rg` rewriting on stable RTK >= 0.49.0, with

@@ -147,8 +147,8 @@ assert_ok   "G: claude-aka shim executable" test -x "$CFGG/bin/claude-aka"
 # ── H. a second launcher name leaves the first one intact ─────────────────────
 # The old name's managed rc block survives a rename, so its shim must too —
 # removing one without the other would leave that name half-working (alias fires,
-# PATH lookup and `aka <name>` dispatch do not). Both go together, via
-# --delete-alias or uninstall.
+# but PATH lookup and non-interactive shells, which use the shim directly, do
+# not). Both go together, via --delete-alias or uninstall.
 PATH="$IPATH" CT_CONFIG_DIR="$CFGG" CT_ALIAS="renamed" SHELL=/bin/bash HOME="$SBG" \
   bash "$INSTALL" --alias --no-auth-inherit >"$SBG/log2" 2>&1
 assert_eq   "H: rename --alias exits 0" "0" "$?"
