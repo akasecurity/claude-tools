@@ -1053,20 +1053,39 @@ compile_mcp_policy_sidecar() {
   local raw="" _src_rc=0
   raw="$( set +eu; . "$cfg" >/dev/null 2>&1; _rc=$?; printf '%s\x1f%s' "${CT_MCP_ALLOW:-}" "${CT_MCP_DENY:-}"; exit "$_rc" )" || _src_rc=$?
   local allow_raw="${raw%%$'\x1f'*}" deny_raw="${raw#*$'\x1f'}"
-  if [ "$_src_rc" -ne 0 ] && { [ -n "$allow_raw" ] || [ -n "$deny_raw" ]; }; then
-    warn "aka-claude-tools.config sourced with an error (exit $_src_rc) while reading CT_MCP_ALLOW/CT_MCP_DENY — a value was set and compiled, but part of the config did not run. Review the config and re-run ./install.sh."
+  # Mirror compile_org_sidecar's two-branch warning EXACTLY: warn on every source
+  # failure, not just one where a value happened to already be captured — a config
+  # that errors before CT_MCP_ALLOW/CT_MCP_DENY are ever reached must not compile a
+  # silently-empty (fail-open) sidecar with no signal.
+  if [ "$_src_rc" -ne 0 ]; then
+    if [ -z "$allow_raw" ] && [ -z "$deny_raw" ]; then
+      warn "aka-claude-tools.config could not be sourced (exit $_src_rc) — CT_MCP_ALLOW/CT_MCP_DENY NOT compiled; the MCP policy tier is INACTIVE until you fix the config and re-run ./install.sh."
+    else
+      warn "aka-claude-tools.config sourced with an error (exit $_src_rc) — a CT_MCP_ALLOW/CT_MCP_DENY value was set and compiled, but part of the config did not run. Review the config and re-run ./install.sh."
+    fi
   fi
   case "$allow_raw" in *$'\n'*) die "CT_MCP_ALLOW in $cfg must be a single line (multiline values are rejected)." ;; esac
   case "$deny_raw"  in *$'\n'*) die "CT_MCP_DENY in $cfg must be a single line (multiline values are rejected)." ;; esac
 
   local allow_json="[]" deny_json="[]"
   if [ -n "$allow_raw" ]; then
+    # A leading/trailing/doubled comma splits to an EMPTY array element under most
+    # IFS splits, but bash's word splitting drops a *trailing* empty field outright
+    # (matching plain IFS-whitespace behavior) — so a trailing comma would silently
+    # vanish instead of reaching _mcp_server_name_to_json's blank-entry check below.
+    # Catch all three shapes here, in the raw string, before that field loss can happen.
+    case "$allow_raw" in
+      ,*|*,|*,,*) die "CT_MCP_ALLOW in $cfg has an empty entry (a leading, trailing, or doubled comma)." ;;
+    esac
     local IFS=,; set -f; local -a _names=($allow_raw); set +f; unset IFS
     local n; local -a _out=()
     for n in "${_names[@]}"; do _out+=("$(_mcp_server_name_to_json "CT_MCP_ALLOW" "$cfg" "$n")"); done
     allow_json="$(printf '%s\n' "${_out[@]}" | jq -R . | jq -s -c .)"
   fi
   if [ -n "$deny_raw" ]; then
+    case "$deny_raw" in
+      ,*|*,|*,,*) die "CT_MCP_DENY in $cfg has an empty entry (a leading, trailing, or doubled comma)." ;;
+    esac
     local IFS=,; set -f; local -a _names=($deny_raw); set +f; unset IFS
     local n; local -a _out=()
     for n in "${_names[@]}"; do _out+=("$(_mcp_server_name_to_json "CT_MCP_DENY" "$cfg" "$n")"); done
@@ -1143,8 +1162,16 @@ compile_bootstrap_sidecar() {
 
   local raw="" _src_rc=0
   raw="$( set +eu; . "$cfg" >/dev/null 2>&1; _rc=$?; printf '%s' "${CT_TRUSTED_BOOTSTRAP_URLS:-}"; exit "$_rc" )" || _src_rc=$?
-  if [ "$_src_rc" -ne 0 ] && [ -n "$raw" ]; then
-    warn "aka-claude-tools.config sourced with an error (exit $_src_rc) while reading CT_TRUSTED_BOOTSTRAP_URLS — a value was set and compiled, but part of the config did not run. Review the config and re-run ./install.sh."
+  # Mirror compile_org_sidecar's two-branch warning EXACTLY: warn on every source
+  # failure, not just one where a value happened to already be captured — a config
+  # that errors before CT_TRUSTED_BOOTSTRAP_URLS is ever reached must not compile a
+  # silently-empty (fail-open) sidecar with no signal.
+  if [ "$_src_rc" -ne 0 ]; then
+    if [ -z "$raw" ]; then
+      warn "aka-claude-tools.config could not be sourced (exit $_src_rc) — CT_TRUSTED_BOOTSTRAP_URLS NOT compiled; the trusted-bootstrap tier is INACTIVE until you fix the config and re-run ./install.sh."
+    else
+      warn "aka-claude-tools.config sourced with an error (exit $_src_rc) — CT_TRUSTED_BOOTSTRAP_URLS was set and compiled, but part of the config did not run. Review the config and re-run ./install.sh."
+    fi
   fi
   case "$raw" in *$'\n'*) die "CT_TRUSTED_BOOTSTRAP_URLS in $cfg must be a single line (multiline values are rejected)." ;; esac
 

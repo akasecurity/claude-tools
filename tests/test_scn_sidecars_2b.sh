@@ -159,4 +159,62 @@ assert_ok "(e-2) command-guard-only-deselect re-run succeeds" bash -c "[ $RC3 -e
   || pass "(e-2) trusted-bootstrap.json removed (command-guard deselected)"
 assert_file "(e-2) mcp-policy.json kept (leak-guard still selected)" "$PROFILE/hooks/lib/mcp-policy.json"
 
+# ── (f) a config that fails to SOURCE BEFORE any of the three keys are ever
+#    reached must not silently compile empty sidecars with no signal — WARN loudly
+#    (both compile functions), same as compile_org_sidecar's own #47-a hardening. ──
+inst "command-guard" 'CT_MCP_ALLOW="unterminated'
+assert_ok "(f) unsourceable config: install still succeeds" bash -c "[ $RC -eq 0 ]"
+assert_grep "(f) unsourceable config: MCP policy warns NOT compiled / INACTIVE" \
+  'CT_MCP_ALLOW/CT_MCP_DENY NOT compiled|MCP policy tier is INACTIVE' "$SB/log"
+assert_grep "(f) unsourceable config: trusted-bootstrap warns NOT compiled / INACTIVE" \
+  'CT_TRUSTED_BOOTSTRAP_URLS NOT compiled|trusted-bootstrap tier is INACTIVE' "$SB/log"
+MP="$PROFILE/hooks/lib/mcp-policy.json"; TB="$PROFILE/hooks/lib/trusted-bootstrap.json"
+assert_ok "(f) allow == [] (nothing captured before the error)" \
+  bash -c "jq -e '.allow == []' '$MP' >/dev/null"
+assert_ok "(f) deny == [] (nothing captured before the error)" \
+  bash -c "jq -e '.deny == []' '$MP' >/dev/null"
+assert_ok "(f) rules == [] (nothing captured before the error)" \
+  bash -c "jq -e '.rules == []' '$TB' >/dev/null"
+
+# ── (g) leading / trailing / doubled comma → die naming the key. A trailing comma
+#    is the one bash's word-splitting silently drops (unlike a leading or doubled
+#    one, which split to a visible empty element) — the exact case the comment on
+#    _mcp_server_name_to_json claims is rejected, so pin it explicitly. ──
+inst "command-guard" 'CT_MCP_ALLOW="github,"'
+assert_ok "(g) trailing comma in CT_MCP_ALLOW aborts" bash -c "[ $RC -ne 0 ]"
+assert_grep "(g) trailing comma: dies naming CT_MCP_ALLOW" 'CT_MCP_ALLOW' "$SB/log"
+
+inst "command-guard" 'CT_MCP_DENY=",bad"'
+assert_ok "(g) leading comma in CT_MCP_DENY aborts" bash -c "[ $RC -ne 0 ]"
+assert_grep "(g) leading comma: dies naming CT_MCP_DENY" 'CT_MCP_DENY' "$SB/log"
+
+inst "command-guard" 'CT_MCP_ALLOW="github,,linear"'
+assert_ok "(g) doubled comma in CT_MCP_ALLOW aborts" bash -c "[ $RC -ne 0 ]"
+assert_grep "(g) doubled comma: dies naming CT_MCP_ALLOW" 'CT_MCP_ALLOW' "$SB/log"
+
+# ── (h) a key DELETED from the config (not set to "") on a re-run must behave
+#    exactly like the empty-string case — the compile functions read
+#    ${CT_MCP_ALLOW:-} etc., so an unset var already defaults to empty; this pins
+#    that regression rather than changing behavior. ──
+inst "command-guard" 'CT_MCP_ALLOW="github"
+CT_MCP_DENY="bad"
+CT_TRUSTED_BOOTSTRAP_URLS="https://get.example.dev/install/"'
+assert_ok "(h) initial populated install succeeds" bash -c "[ $RC -eq 0 ]"
+MP="$PROFILE/hooks/lib/mcp-policy.json"; TB="$PROFILE/hooks/lib/trusted-bootstrap.json"
+assert_ok "(h) allow non-empty before the keys are deleted" \
+  bash -c "jq -e '.allow != []' '$MP' >/dev/null"
+
+# Overwrite the config, OMITTING all three keys entirely (not "" — gone).
+printf '# no CT_MCP_ALLOW / CT_MCP_DENY / CT_TRUSTED_BOOTSTRAP_URLS here\n' > "$PROFILE/aka-claude-tools.config"
+SHELL=/bin/bash HOME="$SB" CT_ADDITIONS="command-guard" CT_NONINTERACTIVE=1 \
+  bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$SB/log2" 2>&1
+RC2=$?
+assert_ok "(h) re-run with keys deleted succeeds" bash -c "[ $RC2 -eq 0 ]"
+assert_ok "(h) allow == [] once the key is deleted (not just emptied)" \
+  bash -c "jq -e '.allow == []' '$MP' >/dev/null"
+assert_ok "(h) deny == [] once the key is deleted" \
+  bash -c "jq -e '.deny == []' '$MP' >/dev/null"
+assert_ok "(h) rules == [] once the key is deleted" \
+  bash -c "jq -e '.rules == []' '$TB' >/dev/null"
+
 t_summary
