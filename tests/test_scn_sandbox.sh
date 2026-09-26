@@ -24,11 +24,16 @@
 #      never touches) survives BOTH select and deselect.
 #   4. a pre-existing user `sandbox.enabled: false` is STASHED on select (overwritten to
 #      true while selected) and RESTORED to false on deselect — never just deleted.
-#   5. Linux with no `bwrap` on PATH → skipped with the documented notice, install
+#   5. OWNERSHIP, not silent clobber: once selected, sandbox.enabled belongs to this
+#      addition like any other kit-managed setting — a manually-edited `false` on a
+#      re-apply (still selected) is set back to `true`, but never SILENTLY: a warn line
+#      names the value it overwrote and how to actually turn the sandbox off.
+#   6. Linux with no `bwrap` on PATH → skipped with the documented notice, install
 #      still exits 0 (soft-skip: opt-in addition, not a fatal dependency).
-#   6. idempotent re-run (select twice in a row) produces semantically unchanged
+#   7. idempotent re-run (select twice in a row) produces semantically unchanged
 #      settings, and does NOT corrupt the stash (a second select must not re-stash the
-#      kit's own prior write as if it were a fresh user value).
+#      kit's own prior write as if it were a fresh user value), and does NOT print the
+#      ownership warning when nothing was manually changed.
 #
 # Fully sandboxed: fake $HOME via tests/lib.sh's sandbox(), --no-auth-inherit,
 # CT_ADDITIONS explicit selection. Never touches a real ~/.claude*.
@@ -158,7 +163,33 @@ else
 fi
 assert_nlit "prior-value: the stash marker itself is cleaned up" '_aka_prior_sandbox_enabled' "$S5"
 
-# ── 5. Linux with no bwrap on PATH → soft-skip with the documented notice ─────
+# ── 5. ownership: a manual edit back to false, while still SELECTED, is set back to
+#      true — but never silently. Select once (clean), THEN hand-edit sandbox.enabled to
+#      false (simulating a user turning it off without deselecting the addition), THEN
+#      re-apply with the SAME selection — the fix must warn, by value, and restore true.
+SB6="$(sandbox)"; PROFILE6="$SB6/profile"
+install_into "$SB6" "$PROFILE6" "sandbox" >"$SB6/select.log" 2>&1
+assert_install_ok "ownership: initial select exits 0" "$SB6/select.log" "$?"
+S6="$PROFILE6/settings.json"
+jq -e '.sandbox.enabled == true' "$S6" >/dev/null 2>&1 \
+  && pass "ownership: sandbox.enabled is true after the initial select" \
+  || fail "ownership: sandbox.enabled is true after the initial select" "got: $(jq -c '.sandbox' "$S6" 2>/dev/null)"
+# Hand-edit: still selected, but the user flips it off directly in settings.json.
+tmp6="$(mktemp)"; jq '.sandbox.enabled = false' "$S6" > "$tmp6" && mv "$tmp6" "$S6"
+install_into "$SB6" "$PROFILE6" "sandbox" >"$SB6/reapply.log" 2>&1
+assert_install_ok "ownership: re-apply (still selected) exits 0" "$SB6/reapply.log" "$?"
+assert_lit "ownership: warns by value, names how to actually turn it off" \
+  "sandbox: sandbox.enabled was false; set back to true because the sandbox addition is selected (deselect it to turn the sandbox off)." \
+  "$SB6/reapply.log"
+jq -e '.sandbox.enabled == true' "$S6" >/dev/null 2>&1 \
+  && pass "ownership: re-apply sets sandbox.enabled back to true (never silently left false)" \
+  || fail "ownership: re-apply sets sandbox.enabled back to true" "got: $(jq -c '.sandbox' "$S6" 2>/dev/null)"
+# Never treated as a genuine "prior user value" to stash-and-restore — ownership means
+# the kit's OWN value, not a value it owes the user a restore of.
+assert_nlit "ownership: the hand-edited false is NOT stashed as a prior value" \
+  '_aka_prior_sandbox_enabled' "$S6"
+
+# ── 6. Linux with no bwrap on PATH → soft-skip with the documented notice ─────
 SB3="$(sandbox)"; PROFILE3="$SB3/profile"
 STUBBIN="$(install_path)"   # tests/lib.sh helper — a hermetic PATH that never includes bwrap
 install_into "$SB3" "$PROFILE3" "sandbox" "CT_UNAME=Linux" "PATH=$STUBBIN" \
@@ -174,7 +205,7 @@ else
   pass "linux-no-bwrap: no sandbox key was written (no settings.json at all)"
 fi
 
-# ── 6. idempotent re-run — selecting twice in a row is semantically unchanged,
+# ── 7. idempotent re-run — selecting twice in a row is semantically unchanged,
 #      and does NOT re-stash the kit's own value as if it were a fresh user one ──
 # Compared with `jq -S .` (recursive key-sort), not a byte/hash diff: install.sh's
 # top-level JSON key ORDER is not itself a stable contract (a pre-existing,
@@ -196,6 +227,8 @@ assert_eq "idempotent: settings.json content unchanged across a repeat select" \
   "$first_sorted" "$second_sorted"
 assert_nlit "idempotent: a repeat select does NOT stash its own prior write" \
   '_aka_prior_sandbox_enabled' "$S4"
+assert_nlit "idempotent: no ownership warning when nothing was manually changed" \
+  "sandbox.enabled was" "$SB4/second.log"
 # And deselecting after two selects fully removes it (nothing was ever a genuine
 # pre-existing user value here) rather than "restoring" the kit's own true.
 install_into "$SB4" "$PROFILE4" "" >"$SB4/deselect.log" 2>&1

@@ -1731,24 +1731,37 @@ apply_additions() {
     fi
   fi
 
-  # 4d-pre1c. Stash the pre-install value of .sandbox.enabled, now that $existing is
-  # loaded — same singleton-overwrite problem as statusLine above (the merge OVERWRITES
-  # a scalar, never unions it), same fix: stash the user's prior value once, restore it
-  # on deselect (prune_sandbox). Unlike statusLine, a plain boolean carries no fingerprint
-  # to tell "the kit's own true from a re-apply" apart from "the user's own true" by VALUE
-  # alone, so identity is tracked with a meta flag (`sandbox_installed`) instead of
-  # inspecting the value: stash only the FIRST time this addition is ever applied to this
-  # profile (no stash yet AND the meta flag isn't already set), never on a repeat
-  # select — which would otherwise re-stash the kit's own prior write over the genuine
-  # original on every re-apply. Gated on `_sb_supported` (set above): a skipped-platform
-  # run touches nothing here, exactly like it adds nothing to `add`.
+  # 4d-pre1c. Reconcile .sandbox.enabled, now that $existing is loaded — same
+  # singleton-overwrite problem as statusLine above (the merge OVERWRITES a scalar,
+  # never unions it). Two distinct cases, both keyed on the `sandbox_installed` meta
+  # flag (a plain boolean carries no fingerprint to tell "the kit's own true from a
+  # re-apply" apart from "the user's own true" by VALUE alone, unlike statusLine's
+  # command string, so identity is tracked in `.aka-claude-tools-meta` instead):
+  #
+  #   • NOT already installed (first time this addition is ever applied here): stash
+  #     whatever prior value is present (once — `_sb_has_stash` guards a stash already
+  #     in place) into `_aka_prior_sandbox_enabled`, restored on deselect (prune_sandbox).
+  #   • ALREADY installed (a prior apply set sandbox.enabled=true and recorded the meta
+  #     flag): sandbox.enabled belongs to a SELECTED sandbox addition, same as any other
+  #     kit-managed setting — a re-apply is EXPECTED to keep it true. But "belongs to the
+  #     kit" must never mean "silently overwritten": if it's anything other than `true`
+  #     right now (a manual edit back to false, most likely), warn plainly, by value,
+  #     before the merge below sets it back — never a silent clobber.
+  #
+  # Gated on `_sb_supported` (set above): a skipped-platform run touches nothing here,
+  # exactly like it adds nothing to `add`.
   if is_selected sandbox "$_sel_ids" && [ "$_sb_supported" = "1" ]; then
     local _sb_has_stash=0 _sb_prev_installed
     if [ "$existing" != "{}" ]; then
       printf '%s' "$existing" | jq -e 'has("_aka_prior_sandbox_enabled")' >/dev/null 2>&1 && _sb_has_stash=1
     fi
     _sb_prev_installed="$(meta_get "$config_dir" sandbox_installed)"
-    if [ "$_sb_has_stash" = "0" ] && [ "$_sb_prev_installed" != "1" ] \
+    if [ "$_sb_prev_installed" = "1" ]; then
+      if printf '%s' "$existing" | jq -e '(.sandbox|type)=="object" and (.sandbox|has("enabled"))' >/dev/null 2>&1; then
+        local _sb_cur; _sb_cur="$(printf '%s' "$existing" | jq -r '.sandbox.enabled | tostring')"
+        [ "$_sb_cur" != "true" ] && warn "sandbox: sandbox.enabled was ${_sb_cur}; set back to true because the sandbox addition is selected (deselect it to turn the sandbox off)."
+      fi
+    elif [ "$_sb_has_stash" = "0" ] \
        && printf '%s' "$existing" | jq -e '.sandbox.enabled != null' >/dev/null 2>&1; then
       warn "Replacing your existing sandbox.enabled with the kit's — your previous value is saved and restored if you later deselect 'sandbox'."
       existing="$(printf '%s' "$existing" | jq '._aka_prior_sandbox_enabled = .sandbox.enabled')"
