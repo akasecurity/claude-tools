@@ -15,9 +15,12 @@ jq -n --arg v "$(cat VERSION)" '{
 }' > "$OUT/.claude-plugin/plugin.json"
 
 # copy launcher + preflight + shared lib (secret-patterns.json for defense-in-depth,
-# plus the vendored guard-core every bundled guard hook runs on)
+# the vendored guard-core every bundled guard hook runs on, and audit.ts — the local
+# security-event audit log the guard hooks call; in the plugin, profile-root
+# resolution never finds a .aka-claude-tools-meta file, so it writes nothing here)
 install -m 0755 config/hooks/bun-hook-launch.sh config/hooks/preflight.sh "$HK"/
-mkdir -p "$HK/lib" && cp config/hooks/lib/secret-patterns.json config/hooks/lib/guard-core.js "$HK/lib/"
+mkdir -p "$HK/lib" && cp config/hooks/lib/secret-patterns.json config/hooks/lib/guard-core.js \
+  config/hooks/lib/audit.ts "$HK/lib/"
 
 # copy each bundled guard + build its hooks.json entry from additions.json
 hooks='{"hooks":{"PreToolUse":[],"SessionStart":[]}}'

@@ -191,22 +191,29 @@ async function main(): Promise<void> {
     coreUnavailable();
   }
 
-  // ai-tc detection only ever turns scanning off; if it throws, scan (the safe direction).
+  // ai-tc detection only ever turns scanning off; if it throws, scan (the safe
+  // direction) and default the audit log on too (more visibility, never less).
   let scanSecrets = true;
+  let auditLog = true;
   try {
-    scanSecrets = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots(), ...projectOpt(input) }))
-      .scanSecrets(tool) !== false;
-  } catch { scanSecrets = true; }
+    const aitcPolicy = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots(), ...projectOpt(input) }));
+    scanSecrets = aitcPolicy.scanSecrets(tool) !== false;
+    auditLog = aitcPolicy.auditLog !== false;
+  } catch { scanSecrets = true; auditLog = true; }
 
   const { policy, warnings } = loadPolicy();
   for (const w of warnings) console.error(w);
 
+  // parsePatterns() is called INSIDE this try (not hoisted above it): a throw here must
+  // still route to coreUnavailable() below, same as a throw from evaluateMcpInput itself.
+  let patterns: ReturnType<Core['parsePatterns']>;
   let d: ReturnType<Core['evaluateMcpInput']>;
   let server: string;
   try {
+    patterns = core.parsePatterns(loadPatternsRaw());
     server = core.mcpServerOf(tool) ?? '';
     d = core.evaluateMcpInput(tool, input.tool_input, {
-      patterns: core.parsePatterns(loadPatternsRaw()),
+      patterns,
       // Regex tiers only (key shapes + org markers). mcp-guard runs on every MCP call,
       // so trufflehog's per-call process cost stays on the Bash and web egress guards.
       scanner: () => 'clean',
@@ -226,6 +233,41 @@ async function main(): Promise<void> {
     const line = typeof code === 'string' ? NOTICE_MSG[code] : undefined;
     if (line) console.error(P + line);
   }
+
+  // Local security-event audit log (opt-out via ai-tc's presence, see lib/audit.ts).
+  // Best effort: loaded lazily so a broken audit.ts can never break the fail-closed
+  // contract above, and wrapped so it never changes the decision or exit code.
+  // mcp-guard runs on every MCP call, so ANY of its own notices (not just
+  // alert-level ones — e.g. a stale/invalid org pattern) is audit-worthy, unlike
+  // command-guard/leak-guard where only an alert-level notice is.
+  try {
+    const { appendAudit } = await import('./lib/audit.ts');
+    const notice = (d.notices as { code?: unknown; message?: unknown }[])
+      .find((n) => n && typeof n === 'object');
+    // The tool input is redacted/capped by formatAuditLine same as any other
+    // free-text field; JSON.stringify first so an object/array snippet reads as
+    // a scannable string rather than "[object Object]".
+    let snippet: string | undefined;
+    try { snippet = JSON.stringify(input.tool_input); } catch { snippet = undefined; }
+    const profileRoot = profileRoots()[0] ?? null;
+    if (d.kind === 'block') {
+      appendAudit(
+        { hook: 'mcp-guard', tool, kind: 'block', rule: d.rule, snippet },
+        { profileRoot, enabled: auditLog, patterns },
+      );
+    } else if (notice) {
+      appendAudit(
+        {
+          hook: 'mcp-guard', tool, kind: 'alert',
+          rule: typeof notice.code === 'string' ? notice.code : undefined,
+          detail: typeof notice.message === 'string' ? notice.message : undefined,
+          snippet,
+        },
+        { profileRoot, enabled: auditLog, patterns },
+      );
+    }
+  } catch { /* audit logging must never affect the decision */ }
+
   if (d.kind === 'block') {
     const msg = BLOCK_MSG[d.rule] as ((s: string) => string) | undefined;
     console.error(P + (msg ? msg(server) : `blocked — ${typeof d.reason === 'string' ? d.reason : 'unrecognised guard-core rule.'}`));

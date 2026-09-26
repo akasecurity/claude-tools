@@ -75,6 +75,17 @@
 #                      Requires CT_ALIAS; implies non-interactive.
 #   --version, -V      Print the kit version (from the VERSION file) and exit. Runs
 #                      before any dependency check, so it works on a bare checkout.
+#   --audit-log        READ-ONLY: print the local security-event audit log (see
+#                      hooks/lib/audit.ts) for one profile — counts by kind and rule,
+#                      then the last 20 events (already redacted/capped by
+#                      formatAuditLine; nothing further is redacted here). Profile
+#                      resolution matches the other agent modes: CT_CONFIG_DIR when
+#                      set, else the default profile (~/.claude). Reads
+#                      <profile>/logs/security-<YYYY-MM>.jsonl; with no CT_AUDIT_MONTH
+#                      (or --month YYYY-MM), uses the current UTC month. Prints
+#                      "no security events recorded" when that file doesn't exist.
+#                      Never writes anything — the writer is lib/audit.ts, called
+#                      from the guard hooks, never from this script.
 
 set -euo pipefail
 
@@ -94,7 +105,15 @@ CT_APPLY=0
 CT_ALIAS_MODE=0
 CT_DELETE_ALIAS=0
 CT_ENUMERATE=0
+CT_AUDIT_LOG_MODE=0
+CT_AUDIT_MONTH="${CT_AUDIT_MONTH:-}"
+# `--month YYYY-MM` takes a value; a plain `for arg in "$@"` can't peek the next
+# token, so track "the previous arg was --month" across iterations instead.
+_prev_flag=""
 for arg in "$@"; do
+  if [ "$_prev_flag" = "--month" ]; then
+    CT_AUDIT_MONTH="$arg"; _prev_flag=""; continue
+  fi
   case "$arg" in
     --version|-V)      printf 'aka-claude-tools %s\n' "$KIT_VERSION"; exit 0 ;;
     --defaults)        export CT_NONINTERACTIVE=1 ;;
@@ -103,6 +122,8 @@ for arg in "$@"; do
     --alias)           CT_ALIAS_MODE=1; export CT_NONINTERACTIVE=1 ;;
     --delete-alias)    CT_DELETE_ALIAS=1; export CT_NONINTERACTIVE=1 ;;
     --enumerate)       CT_ENUMERATE=1; export CT_NONINTERACTIVE=1 ;;
+    --audit-log)       CT_AUDIT_LOG_MODE=1; export CT_NONINTERACTIVE=1 ;;
+    --month)           _prev_flag="--month" ;;
   esac
 done
 
@@ -112,7 +133,8 @@ done
 ensure_dep jq "jq (required)" 1
 # The claude-CLI check and the banner are installer chrome — skip them in --apply
 # (engine) mode, which is invoked programmatically and only needs jq.
-if [ "$CT_APPLY" != "1" ] && [ "$CT_ALIAS_MODE" != "1" ] && [ "$CT_DELETE_ALIAS" != "1" ] && [ "$CT_ENUMERATE" != "1" ]; then
+if [ "$CT_APPLY" != "1" ] && [ "$CT_ALIAS_MODE" != "1" ] && [ "$CT_DELETE_ALIAS" != "1" ] \
+   && [ "$CT_ENUMERATE" != "1" ] && [ "$CT_AUDIT_LOG_MODE" != "1" ]; then
   command -v claude >/dev/null 2>&1 || warn "claude CLI not found on PATH — the alias will still be written, but install Claude Code to use it."
   # bun (the guard hooks) and trufflehog (the secret scans) are checked/offered when those
   # additions are selected — see the build step below.
@@ -1810,20 +1832,22 @@ apply_additions() {
     meta_set "$config_dir" sandbox_installed 1
   fi
 
-  # 4d-pre1a. The shared egress-guard libs (hooks/lib/secret-patterns.json and the
-  # compiled hooks/lib/org-egress.json sidecar) are owned by NO single addition — they're
-  # placed/compiled whenever any egress guard (leak-guard, command-guard, mcp-guard) or
-  # prompt-guard (its credential-pairing tier reads secret-patterns.json too) is
-  # selected. The per-addition deselect loop above can't remove them (no guard's
-  # owned-paths list includes them), so deselecting every guard would orphan them.
-  # Remove both only when NO consumer remains. The vendored guard-core has a wider
-  # consumer set still (every bun guard hook, including rtk-safe), so it's cleaned up
+  # 4d-pre1a. The shared egress-guard libs (hooks/lib/secret-patterns.json, the
+  # compiled hooks/lib/org-egress.json sidecar, and hooks/lib/audit.ts — the local
+  # security-event audit log every one of these four hooks calls) are owned by NO
+  # single addition — they're placed whenever any egress guard (leak-guard,
+  # command-guard, mcp-guard) or prompt-guard (its credential-pairing tier reads
+  # secret-patterns.json too) is selected. The per-addition deselect loop above can't
+  # remove them (no guard's owned-paths list includes them), so deselecting every
+  # guard would orphan them. Remove all three only when NO consumer remains. The
+  # vendored guard-core has a wider consumer set still (every bun guard hook,
+  # including rtk-safe, which never calls appendAudit), so it's cleaned up
   # separately below — only once NO consumer remains does the now-empty hooks/lib dir
   # come down.
   if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids" \
     && ! is_selected mcp-guard "$_sel_ids" && ! is_selected prompt-guard "$_sel_ids"; then
     _egress_lib_removed=
-    for _lib in secret-patterns.json org-egress.json; do
+    for _lib in secret-patterns.json org-egress.json audit.ts; do
       if [ -e "$config_dir/hooks/lib/$_lib" ]; then
         rm -f "$config_dir/hooks/lib/$_lib"
         _egress_lib_removed=1
@@ -2219,6 +2243,38 @@ EOF
         unresolved_aliases: [ $aliases[] | select(.target as $t | ($pdirs | index($t)) | not) ] }'
 }
 
+# ── --audit-log entry: read-only summary of one profile's local security-event
+# audit log (hooks/lib/audit.ts writes it; this only ever reads). Profile
+# resolution mirrors the other agent modes: CT_CONFIG_DIR when set, else the
+# default profile (~/.claude — same convention aitac_present's "no config_dir"
+# branch uses). CT_AUDIT_MONTH (or --month YYYY-MM) selects the month; the
+# current UTC month otherwise, matching audit.ts's own UTC month key.
+audit_log_entry() {
+  local config_dir="${CT_CONFIG_DIR:-$HOME/.claude}"
+  config_dir="${config_dir/#\~/$HOME}"
+  local month="${CT_AUDIT_MONTH:-}"
+  [ -n "$month" ] || month="$(date -u +%Y-%m)"
+  local file="$config_dir/logs/security-${month}.jsonl"
+
+  if [ ! -s "$file" ]; then
+    say "no security events recorded"
+    return 0
+  fi
+
+  say "${C_BOLD}Security audit log${C_RST} — ${config_dir} (${month})"
+  say ""
+  say "by kind:"
+  jq -r '.kind // "(none)"' "$file" 2>/dev/null | sort | uniq -c | sort -rn \
+    | while read -r n k; do printf '  %5s  %s\n' "$n" "$k"; done
+  say ""
+  say "by rule:"
+  jq -r '.rule // "(none)"' "$file" 2>/dev/null | sort | uniq -c | sort -rn \
+    | while read -r n r; do printf '  %5s  %s\n' "$n" "$r"; done
+  say ""
+  say "last 20 event(s):"
+  tail -n 20 "$file"
+}
+
 # Run the installer only when EXECUTED, not when SOURCED. Sourcing the script (with
 # its top-level definitions) lets the test suite reach the pure helpers above
 # (merge_settings, prune_hook_regs, setup_alias, …) without performing an install.
@@ -2229,5 +2285,6 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   elif [ "$CT_ALIAS_MODE" = "1" ];    then alias_entry
   elif [ "$CT_DELETE_ALIAS" = "1" ];  then delete_alias_entry
   elif [ "$CT_ENUMERATE" = "1" ];     then enumerate_entry
+  elif [ "$CT_AUDIT_LOG_MODE" = "1" ]; then audit_log_entry
   else ct_main; fi
 fi
