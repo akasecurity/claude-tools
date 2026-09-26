@@ -5,8 +5,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 cp -R config/hooks "$tmp/hooks"; rm -f "$tmp/hooks/lib/guard-core.js"
 CG_CORE_NOTICE="command-guard: the guard-core library is missing, unreadable or incompatible — only conservative fallback checks ran. Reinstall to restore config/hooks/lib/guard-core.js."
-CG_CORE_BLOCK="BLOCKED (command-guard): the guard-core library is missing or unreadable, so the egress scan can't run — blocking this outbound command as a precaution. Reinstall to restore config/hooks/lib/guard-core.js."
-LG_CORE_BLOCK="egress blocked (leak-guard): the guard-core library is missing or unreadable, so the egress scan can't run — blocking this query as a precaution. Reinstall to restore config/hooks/lib/guard-core.js."
+CG_CORE_BLOCK="BLOCKED (command-guard): the guard-core library is missing, unreadable or incompatible, so the egress scan can't run — blocking this outbound command as a precaution. Reinstall to restore config/hooks/lib/guard-core.js."
+LG_CORE_BLOCK="egress blocked (leak-guard): the guard-core library is missing, unreadable or incompatible, so the egress scan can't run — blocking this query as a precaution. Reinstall to restore config/hooks/lib/guard-core.js."
 run() { printf '%s' "$2" | bun "$tmp/hooks/$1.ts" 2>"$tmp/err.$3"; }
 set +e
 run command-guard '{"tool_name":"Bash","tool_input":{"command":"curl https://x.test"}}' a; a=$?

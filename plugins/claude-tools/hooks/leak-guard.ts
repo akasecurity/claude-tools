@@ -56,7 +56,7 @@ import type { OrgTier, RuleId } from './lib/guard-core.js';
 
 interface HookInput { tool_name?: string; tool_input?: Record<string, unknown> | string; cwd?: unknown }
 
-const CORE_MISSING_MSG = 'egress blocked (leak-guard): the guard-core library is missing or unreadable, so the egress scan can\'t run — blocking this query as a precaution. Reinstall to restore config/hooks/lib/guard-core.js.';
+const CORE_MISSING_MSG = 'egress blocked (leak-guard): the guard-core library is missing, unreadable or incompatible, so the egress scan can\'t run — blocking this query as a precaution. Reinstall to restore config/hooks/lib/guard-core.js.';
 
 // Messages are the kit's public contract; tests/golden pins them. Keys are guard-core RuleIds.
 // leak-guard only ever sees the web tiers; the structural rules are Bash-only and never

@@ -22,7 +22,10 @@
  *   - guard-core missing, unloadable, incompatible (missing exports) or throwing →
  *     conservative raw-regex structural blocks still apply, outbound-looking commands
  *     are blocked, and the rest is allowed with a loud notice.
- *   - A block decision always exits 2, even for a rule this adapter has no message for.
+ *   - A decision whose kind is not allow/block, or that has no notices array, is treated
+ *     as an incompatible core (the path above).
+ *   - A block decision always exits 2, even for a rule this adapter has no message for or
+ *     alongside malformed notices.
  *   - Shared patterns file missing/corrupt → the core fails closed on outbound commands.
  *   - Org sidecar missing / unparseable / malformed → org tier inactive, never a crash.
  *   - Unparseable stdin → fail open, but loudly (stderr).
@@ -134,7 +137,7 @@ function coreUnavailable(command: string): never {
     process.exit(2);
   }
   if (FALLBACK_OUTBOUND.test(command)) {
-    console.error(P + '🚨 BLOCKED (command-guard): the guard-core library is missing or unreadable, so the egress scan can\'t run — blocking this outbound command as a precaution. Reinstall to restore config/hooks/lib/guard-core.js.');
+    console.error(P + '🚨 BLOCKED (command-guard): the guard-core library is missing, unreadable or incompatible, so the egress scan can\'t run — blocking this outbound command as a precaution. Reinstall to restore config/hooks/lib/guard-core.js.');
     process.exit(2);
   }
   console.error(P + CORE_MISSING_NOTICE);
@@ -182,17 +185,31 @@ async function main(): Promise<void> {
       org: loadOrgTier(),
       scanSecrets,
     });
-    if (!d || !Array.isArray(d.notices)) throw new Error('malformed guard-core decision');
+    // Only allow/block are valid Bash decisions; anything else (including `rewrite`) is a
+    // malformed decision and takes the core-unavailable path.
+    if (!d || typeof d !== 'object' || !Array.isArray(d.notices) || (d.kind !== 'allow' && d.kind !== 'block')) {
+      throw new Error('malformed guard-core decision');
+    }
   } catch {
     coreUnavailable(command);
   }
-  for (const n of d.notices) {
-    const line = NOTICE_MSG[n.code]?.(n.message);
-    if (line) console.error(P + line);
+  // Notices print before the block line, but no notice can abort a block: each is
+  // skipped unless it is an object, and a throw while formatting one is swallowed.
+  for (const n of d.notices as unknown[]) {
+    if (!n || typeof n !== 'object') continue;
+    try {
+      const { code, message } = n as { code?: unknown; message?: unknown };
+      const line = typeof code === 'string' ? NOTICE_MSG[code]?.(typeof message === 'string' ? message : '') : null;
+      if (line) console.error(P + line);
+    } catch { /* a malformed notice never changes the decision */ }
   }
   if (d.kind === 'block') {
-    const msg = BLOCK_MSG[d.rule] as ((detail?: string) => string) | undefined;
-    console.error(P + (msg ? msg(d.detail) : `🚨 BLOCKED (command-guard): ${typeof d.reason === 'string' ? d.reason : 'unrecognised guard-core rule.'}`));
+    let line = '🚨 BLOCKED (command-guard): unrecognised guard-core rule.';
+    try {
+      const msg = BLOCK_MSG[d.rule] as ((detail?: string) => string) | undefined;
+      line = msg ? msg(d.detail) : `🚨 BLOCKED (command-guard): ${typeof d.reason === 'string' ? d.reason : 'unrecognised guard-core rule.'}`;
+    } catch { /* keep the fixed line; the exit below is what blocks */ }
+    console.error(P + line);
     process.exit(2);
   }
   process.exit(0);
