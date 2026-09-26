@@ -1,0 +1,11 @@
+{
+  "$comment": [
+    "Maintainer notes, stripped from the merged settings.json by install.sh, never shipped to a user's config.",
+    "Payload for the opt-in `sandbox` addition. Enables Claude Code's native OS-level sandbox (sandbox-exec on macOS, bwrap on Linux) so Bash and every other tool run confined, not just the Read tool's own deny rules.",
+    "Deliberately does NOT also set sandbox.filesystem.denyRead: Claude Code's own documented schema for that field says it is 'Merged with paths from Read(...) deny permission rules', i.e. the runtime already folds settings.base.json's credential Read(...) denies into the sandbox's effective filesystem denylist on its own, with the correct permission-rule glob resolution. A kit-written denyRead containing the SAME `Read(<path>)` strings verbatim would instead be resolved under sandbox.filesystem's own (narrower) path rules, where a no-prefix glob like `**/.env` resolves relative to the settings file root rather than matching project-relative — silently protecting nothing. Enabling the sandbox and leaving denyRead to Claude Code's own merge is the correct-semantics path; see install.sh's sandbox block for the platform gate and the stash/restore of a prior sandbox.enabled value.",
+    "Deliberately narrow otherwise too: this addition only flips sandbox.enabled on. It does not set autoAllowBashIfSandboxed and does not touch sandbox.network — those are the operator's call, not this kit's."
+  ],
+  "sandbox": {
+    "enabled": true
+  }
+}

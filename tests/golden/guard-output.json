@@ -54,6 +54,18 @@
     "stdout": ""
   },
   {
+    "id": "cg-bootstrap-exempt",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-bootstrap-L",
+    "exit": 2,
+    "stderr": "[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): piping output into a shell interpreter (curl … | bash). Download, inspect, then run.\n",
+    "stdout": ""
+  },
+  {
     "id": "cg-alert-post",
     "exit": 0,
     "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): curl HTTP upload (POST / --data) (allowed).\n",
@@ -215,6 +227,42 @@
     "id": "rs-pipe",
     "exit": 0,
     "stderr": "",
+    "stdout": ""
+  },
+  {
+    "id": "mcp-cred",
+    "exit": 2,
+    "stderr": "mcp-guard: blocked — MCP tool input contains a token or key value.\n",
+    "stdout": ""
+  },
+  {
+    "id": "mcp-benign",
+    "exit": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "id": "mcp-denied",
+    "exit": 2,
+    "stderr": "mcp-guard: blocked — MCP server \"bad\" is denied by policy (CT_MCP_DENY).\n",
+    "stdout": ""
+  },
+  {
+    "id": "mcp-not-allowed",
+    "exit": 2,
+    "stderr": "mcp-guard: blocked — MCP server \"github\" is not on the allow list (CT_MCP_ALLOW).\n",
+    "stdout": ""
+  },
+  {
+    "id": "mcp-core-missing",
+    "exit": 2,
+    "stderr": "mcp-guard: blocked — the guard-core library is missing, unreadable or incompatible; blocking as a precaution. Reinstall to restore it.\n",
+    "stdout": ""
+  },
+  {
+    "id": "mcp-unscannable",
+    "exit": 2,
+    "stderr": "mcp-guard: blocked — MCP tool input has too many fields, is too large, or is too deeply nested to scan.\n",
     "stdout": ""
   }
 ]

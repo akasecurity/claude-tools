@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs guard-core's conformance fixtures (vendored at tests/fixtures/guard-core-conformance.json,
-# see tools/vendor-guard-core.sh) against claude-tools' REAL hooks — command-guard.ts, rtk-safe.ts
-# and leak-guard.ts — each fixture in its own hermetic sandbox profile. This complements
+# see tools/vendor-guard-core.sh) against claude-tools' REAL hooks — command-guard.ts, rtk-safe.ts,
+# leak-guard.ts and mcp-guard.ts — each fixture in its own hermetic sandbox profile. This complements
 # guard-core's own in-process conformance.test.ts (which exercises the pure core functions
 # directly): here every fixture goes through the adapter I/O layer (stdin JSON, env, exit code,
 # stdout) exactly as Claude Code would invoke it.
@@ -61,6 +61,7 @@ for ((i = 0; i < n; i++)); do
   fx="$(jq -c ".[$i]" "$fixtures")"
   id="$(jq -r .id <<<"$fx")"
   surface="$(jq -r .surface <<<"$fx")"
+
   tool="$(jq -r .tool <<<"$fx")"
   input="$(jq -r .input <<<"$fx")"
   aitc_ctx="$(jq -r '.ctx.aitc // false' <<<"$fx")"
@@ -79,15 +80,33 @@ for ((i = 0; i < n; i++)); do
   path="$PATH"
   [ "$scanner" = "clean" ] && path="$PATH_CLEAN"
 
-  case "$tool" in
-    Bash)      hook_input="$(jq -cn --arg c "$input" '{tool_name:"Bash",tool_input:{command:$c}}')" ;;
-    WebSearch) hook_input="$(jq -cn --arg q "$input" '{tool_name:"WebSearch",tool_input:{query:$q}}')" ;;
-    WebFetch)  hook_input="$(jq -cn --arg u "$input" '{tool_name:"WebFetch",tool_input:{url:$u}}')" ;;
+  case "$surface:$tool" in
+    mcp:mcp__*)
+      # MCP fixtures carry a JSON-object input; the hook JSON is {tool_name, tool_input}.
+      hook_input="$(jq -c '{tool_name:.tool, tool_input:.input}' <<<"$fx")" ;;
+    *:Bash)      hook_input="$(jq -cn --arg c "$input" '{tool_name:"Bash",tool_input:{command:$c}}')" ;;
+    *:WebSearch) hook_input="$(jq -cn --arg q "$input" '{tool_name:"WebSearch",tool_input:{query:$q}}')" ;;
+    *:WebFetch)  hook_input="$(jq -cn --arg u "$input" '{tool_name:"WebFetch",tool_input:{url:$u}}')" ;;
     *) echo "  FAIL $id: unrecognised fixture tool '$tool'"; fails=$((fails + 1)); continue ;;
   esac
 
   outcome=""
-  if [ "$surface" = "bash" ]; then
+  if [ "$surface" = "mcp" ]; then
+    # ctx.mcp → a matching mcp-policy.json in the sandbox hooks copy; none when absent,
+    # so a policy from one fixture never leaks into the next.
+    rm -f "$hooks/lib/mcp-policy.json"
+    if jq -e '.ctx.mcp != null' <<<"$fx" >/dev/null; then
+      jq -c '{allow:(.ctx.mcp.allow // []), deny:(.ctx.mcp.deny // []), sourceHash:""}' <<<"$fx" \
+        > "$hooks/lib/mcp-policy.json"
+    fi
+    set +e
+    printf '%s' "$hook_input" \
+      | CLAUDE_CONFIG_DIR="$profile" HOME="$decoy_home" PATH="$path" bun "$hooks/mcp-guard.ts" \
+      >"$tmp/mg.out" 2>"$tmp/mg.err"
+    mg_exit=$?
+    set -e
+    if [ "$mg_exit" -eq 2 ]; then outcome=block; else outcome=allow; fi
+  elif [ "$surface" = "bash" ]; then
     set +e
     printf '%s' "$hook_input" \
       | CLAUDE_CONFIG_DIR="$profile" HOME="$decoy_home" PATH="$path" bun "$hooks/command-guard.ts" \

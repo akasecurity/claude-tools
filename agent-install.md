@@ -92,12 +92,19 @@ don't specify one:
 - Which **additions** to layer on (read `config/additions.json` in this repo for
   the catalog + recommended defaults): secure base settings, leak-guard,
   command-guard (needs `bun`; also blocks writes to shell startup files),
+  mcp-guard (needs `bun`; MCP server allow/deny lists plus a secret scan of MCP inputs),
   rtk-safe (inert until stable `rtk` >= 0.49.0 is installed), responsive status line, shell-audit,
   the recommended nonessential-traffic toggles that don't touch Remote Control
   (error-reporting-off, feedback-off, feedback-survey-off), the opt-out `/wrap-up`
   command, the opt-out secure-research and secure-deep-research workflows, the opt-out
-  harness-pointer, and the two opt-out traffic toggles telemetry-off (off by default
-  because it turns off Remote Control) and autoupdater-off. Additions with a
+  harness-pointer, the opt-out prompt-guard (needs `bun`; warns, never blocks, on
+  prompt-injection phrasing, a credential paired with a send/upload instruction, and
+  encoded shell blobs in what the user typed), the two opt-out traffic toggles telemetry-off (off by default
+  because it turns off Remote Control) and autoupdater-off, and the opt-in sandbox
+  addition (changes Bash behaviour in every session: enables Claude Code's native
+  OS-level sandbox, which already merges secure-settings's credential Read-denies into
+  its own filesystem restrictions at runtime — this addition doesn't duplicate that
+  list; needs `bwrap` and `socat` on PATH on Linux, always available on macOS). Additions with a
   `skill` field are **directory copies**: copy the whole directory into
   `<dir>/skills/` (replace any existing copy so re-installs don't leave stale
   files). Additions with a `workflow` field are **file copies** into
@@ -232,6 +239,8 @@ the user's go-ahead.
   command-guard); registers command-guard with bun's **absolute**
   path (`bun` is a **hard dependency**: selecting command-guard without `bun` aborts
   the install, exit non-zero, rather than soft-skipping a default-on security hook);
+  registers mcp-guard on `mcp__.*` the same way and compiles its `mcp-policy.json`
+  sidecar from `CT_MCP_ALLOW` / `CT_MCP_DENY`;
   merges the read-only `rtk-allowlist.json` for rtk-safe (never a
   blanket `Bash(rtk:*)`); copies the shell-audit
   skill and chmods its `audit.sh`; and seeds `aka-claude-tools.config` when a

@@ -18,6 +18,15 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/bun-hook-launch.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/leak-guard.ts\""
           }
         ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/bun-hook-launch.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/mcp-guard.ts\""
+          }
+        ]
       }
     ],
     "SessionStart": [

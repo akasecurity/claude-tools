@@ -9,6 +9,39 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 ## [Unreleased]
 
 ### Added
+- **`mcp-guard`**: a new PreToolUse guard on every MCP tool call (`mcp__*`), on by default.
+  Applies an MCP server allow/deny policy first (`CT_MCP_DENY` blocks named servers; a
+  non-empty `CT_MCP_ALLOW` blocks every server not on it, both case-insensitive, compiled
+  into an install-time `mcp-policy.json` sidecar), then scans the whole tool input, keys
+  and values at any depth, for token/SSH-key shapes and configured org markers. Regex tiers
+  only (no trufflehog, for per-call latency); input too large or too deeply nested to scan
+  is blocked rather than passed. Defers to ai-tc for content detection where ai-tc covers
+  MCP tools in the profile, while the server policy still applies.
+- **Trusted bootstrap allowlist** for `command-guard`: an opt-in `CT_TRUSTED_BOOTSTRAP_URLS`
+  (space-separated `https://host/path/` prefixes) that exempts a narrow `curl <-f/-s/-S
+  flags only> <an allowed https URL> | bash`/`| sh` shape from the pipe-to-shell block, for
+  legitimate installer scripts. Off by default; anything outside that exact shape (an extra
+  flag, an unlisted host or path) still blocks. Compiled into an install-time
+  `trusted-bootstrap.json` sidecar; a stale sidecar (config changed since compile) still
+  applies with a warning rather than silently disabling.
+- **`prompt-guard`**: a new opt-in `UserPromptSubmit` hook that warns, never blocks, on
+  content in what you typed: prompt-injection phrasing, a credential value paired with a
+  send/post/upload verb, and base64/hex blobs that decode to a shell command. Surfaces via
+  Claude Code's `systemMessage` channel; never edits the prompt or adds anything to the
+  model's context. Narrows to the injection-marker check alone when ai-tc is installed and
+  covers prompt content for the profile.
+- **`sandbox`**: a new opt-in addition that sets `sandbox.enabled`, turning on Claude Code's
+  native OS-level sandbox (`sandbox-exec` on macOS, `bwrap` plus `socat` on Linux) so Bash and every other
+  tool run confined at the OS level, not just the Read tool's own deny rules. Deliberately
+  does not also write `sandbox.filesystem.denyRead` — Claude Code's own sandbox already
+  merges `secure-settings`'s `Read(...)` credential-deny rules into its effective filesystem
+  denylist at runtime with correct glob resolution, so a kit-written copy would be
+  re-resolved under the sandbox's own narrower path rules and silently protect nothing. A
+  pre-existing `sandbox.enabled` value is stashed and restored if the addition is later
+  deselected; deselecting re-disables it (a manual edit back to `false` while selected is
+  warned about and reverted on the next apply).
+- Vendored **guard-core 0.3.1**, the shared decision-logic library `command-guard`,
+  `leak-guard`, `rtk-safe`, and now `mcp-guard` run on.
 - `command-guard` blocks ripgrep's arbitrary-execution vectors: `--pre`,
   `--hostname-bin`, and `RIPGREP_CONFIG_PATH` (which points `rg` at a file of flags,
   injecting `--pre` without either flag appearing in the command text). All three are
@@ -37,6 +70,15 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   `.claude/settings.local.json` turns the deferral off for sessions in that project.
 
 ### Changed
+- **Upgrade: `mcp-guard` turns on for existing installs.** It is a recommended addition, so an
+  interactive installer re-run defaults it to Y and `--defaults` selects it; an explicit
+  `CT_ADDITIONS` list installs it only if the list names it. Plugin users get it with the
+  plugin update. What changes once it is on:
+  - It fails closed: if the guard itself errors (guard-core missing or incompatible,
+    unparseable hook input, an unexpected exception), the MCP call is blocked.
+  - It blocks MCP tool inputs it cannot fully scan: more than 1,000,000 characters of string
+    content (about 1 MB), more than 200,000 values, or nesting deeper than 32 levels.
+  - Every MCP tool call starts one `bun` process for the hook.
 - **Default launcher name is `claude-aka`** (was `aka`) for `~/.claude-aka` and the fallback
   derivation. Bare `aka` and every `aka-*` name belong to the ai-tc AI Traffic Control CLI.
   ai-tc's `aka claude` still runs `aka-claude`, so it keeps working on a profile migrated from

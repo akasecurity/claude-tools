@@ -1,5 +1,5 @@
 export type Harness = "claude" | "codex" | "antigravity" | "grok";
-export type RuleId = "pipe-to-shell" | "startup-write" | "search-exec" | "patterns-unavailable" | "secret-detected" | "org-marker" | "credential-shape";
+export type RuleId = "pipe-to-shell" | "startup-write" | "search-exec" | "patterns-unavailable" | "secret-detected" | "org-marker" | "credential-shape" | "mcp-server-denied" | "mcp-server-not-allowed" | "mcp-input-unscannable";
 export interface Notice {
 	level: "warn" | "alert";
 	code: string;
@@ -19,14 +19,24 @@ export type Decision = {
 	input: string;
 	notices: Notice[];
 };
+export type BootstrapRule = {
+	host: string;
+	pathPrefix: string;
+};
 export interface StructuralResult {
 	pipeToShell: boolean;
 	startupWrite: boolean;
 	searchExec: boolean;
 	degraded: boolean;
 }
-/** Quote-aware checks; on tokenizer failure, the conservative raw regexes (over-block, never allow). */
-export declare function structuralChecks(command: string): StructuralResult;
+/**
+ * Quote-aware checks; on tokenizer failure, the conservative raw regexes (over-block, never allow).
+ * `opts.trustedBootstrap` exempts one exact curl-to-shell install form from pipe-to-shell (see
+ * bootstrap.ts). The exemption exists only on the tokenized path; the raw fallback never applies it.
+ */
+export declare function structuralChecks(command: string, opts?: {
+	trustedBootstrap?: BootstrapRule[];
+}): StructuralResult;
 export interface PatternSet {
 	outbound: RegExp;
 	creds: [
@@ -51,9 +61,20 @@ export interface EvalContext {
 	scanner?: SecretScanner;
 	org?: OrgTier;
 	scanSecrets?: boolean;
+	trustedBootstrap?: BootstrapRule[];
 }
 export declare function evaluateBash(command: string, ctx?: EvalContext): Decision;
 export declare function evaluateWebQuery(text: string, ctx?: EvalContext): Decision;
+export type McpPolicy = {
+	allow?: string[];
+	deny?: string[];
+};
+/** `mcp__<server>__<tool>` → `<server>`; server names may contain single underscores. */
+export declare function mcpServerOf(tool: string): string | null;
+/** Policy first (always applies), then the secret tiers on every string leaf and object key. */
+export declare function evaluateMcpInput(tool: string, input: unknown, ctx?: EvalContext & {
+	mcp?: McpPolicy;
+}): Decision;
 export declare function supportedVersion(version: string): boolean;
 /** Compute the rewritten command (incl. env prefix), or null if nothing applies. */
 export declare function rewrite(command: string): string | null;
@@ -142,6 +163,11 @@ export interface CoexistencePolicy {
 }
 /** ai-tc takes precedence: when present the kit keeps posture only on the tools ai-tc hooks. */
 export declare function coexistencePolicy(status: AitcStatus): CoexistencePolicy;
+export declare const INJECTION_MARKERS: RegExp[];
+export declare function scanPrompt(text: string, opts?: {
+	injectionOnly?: boolean;
+	patterns?: PatternSet | null;
+}): Notice[];
 export declare const VERSION: string;
 
 export {};

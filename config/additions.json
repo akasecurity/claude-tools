@@ -10,6 +10,14 @@
       "settings": "settings.base.json"
     },
     {
+      "id": "sandbox",
+      "name": "sandbox",
+      "prompt": "sandbox: enable Claude Code's native OS-level sandbox (changes Bash behaviour in every session)?",
+      "recommended": false,
+      "description": "Opt-in: turns on Claude Code's native sandbox (sandbox.enabled, sandbox-exec on macOS / bwrap on Linux) so Bash and every other tool run confined at the OS level, not just the Read tool's own deny rules — closing the gap where a Bash `cat ~/.aws/credentials` bypasses a Read-tool-only deny. Deliberately does NOT also write sandbox.filesystem.denyRead: Claude Code's own documented schema for that field already merges settings.base.json's `Read(...)` credential-deny rules into the sandbox's effective filesystem denylist at runtime, with the correct permission-rule glob resolution — a kit-written denyRead containing the same `Read(<path>)` strings verbatim would instead be re-resolved under sandbox.filesystem's own narrower path rules (a no-prefix glob like `**/.env` would resolve relative to the settings file root, not project-relative, and silently protect nothing). Ships off by default because it changes runtime behavior for every Bash call and needs a platform dependency: always supported on macOS, requires `bwrap` on PATH on Linux (skipped with a notice if absent), skipped on any other platform. Deliberately narrow otherwise too: does not set `autoAllowBashIfSandboxed` and does not touch `sandbox.network` — those remain the operator's own call. A pre-existing `sandbox.enabled` value is stashed and restored if you later deselect this addition.",
+      "settings": "settings.sandbox.json"
+    },
+    {
       "id": "leak-guard",
       "name": "leak-guard",
       "prompt": "leak-guard: block secrets + internal identifiers in WEB queries [bun]?",
@@ -30,6 +38,26 @@
       "matcher": "Bash",
       "event": "PreToolUse",
       "usesConfig": true
+    },
+    {
+      "id": "mcp-guard",
+      "name": "mcp-guard",
+      "prompt": "mcp-guard: MCP server allow/deny policy + secrets in MCP tool inputs [bun]?",
+      "recommended": true,
+      "description": "PreToolUse guard on every MCP tool (mcp__*). Applies your MCP server policy first: CT_MCP_DENY blocks the named servers, and a non-empty CT_MCP_ALLOW blocks every server not on it (comma-separated server names, case-insensitive, read from the install-compiled mcp-policy.json sidecar). Then scans the whole tool input, keys and values at any depth, for token/SSH-key shapes and (if configured) your org's internal identifiers (CT_EGRESS_PATTERNS). Regex tiers only: it runs on every MCP call, so trufflehog stays on the Bash and web egress guards, for latency. Input too large or too deeply nested to scan is blocked, not passed. Requires bun, a hard dependency: selecting mcp-guard aborts the install if bun is absent, rather than shipping a default-on security guard silently disabled. Depth: this matches secret and key SHAPES, not PII/PHI/financial data, and it blocks rather than redacts. When ai-tc is installed it covers MCP content detection, so the scan defers to it, while the server policy still applies. The two compose: posture here, detection in ai-tc.",
+      "hook": "hooks/mcp-guard.ts",
+      "matcher": "mcp__.*",
+      "event": "PreToolUse",
+      "usesConfig": true
+    },
+    {
+      "id": "prompt-guard",
+      "name": "prompt-guard",
+      "prompt": "prompt-guard: warn (never block) on prompt-injection phrasing, credential exfil pairing, and encoded shell blobs in what YOU type [bun]?",
+      "recommended": false,
+      "description": "UserPromptSubmit hook that scans the prompt you just typed, not a tool call: a prompt-injection marker (\"ignore previous instructions\", …), a credential value paired with a send/post/upload verb (using the shared secret-patterns corpus), and a base64/hex blob that decodes to a shell command. WARNS ONLY — it never blocks, never edits your prompt, and never adds anything to the model's context; the warning surfaces to you via Claude Code's systemMessage channel. Opt-in and off by default because it is a heads-up for content YOU authored, not an egress boundary like the other guards. Requires bun, like the other bun hooks in this kit (a missing bun aborts the install if selected, the same as command-guard/leak-guard/mcp-guard/statusline/rtk-safe, rather than embedding an unresolvable interpreter path); once installed, a runtime failure of any kind here degrades to silence, never to a block. When ai-tc is installed and enabled for this profile it narrows to the injection-marker check alone, deferring the rest to ai-tc's own prompt-content detection.",
+      "hook": "hooks/prompt-guard.ts",
+      "event": "UserPromptSubmit"
     },
     {
       "id": "rtk-safe",

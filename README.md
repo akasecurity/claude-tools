@@ -30,7 +30,7 @@ adds the guardrails for the obvious foot-guns:
 - **Secrets leaving in a web request** → matched on your machine and blocked.
 - **Context filling with noise** (chatty command output) → summarized before it reaches the model.
 
-Fifteen small pieces, nine on by default and six opt-in. Each stands alone. Take what you want.
+Eighteen small pieces, ten on by default and eight opt-in. Each stands alone. Take what you want.
 
 **claude-tools is safe defaults for the harness; [ai-tc](https://github.com/akasecurity/ai-tc) is the detection engine.** The secret scan here is a shallow fallback — pattern and key-shape matching on egress. It does not detect PII, PHI, or cardholder data, and it does not redact. When you need deep content detection with an audit trail, add ai-tc; the installer offers it. The two compose: posture from claude-tools, detection from ai-tc.
 
@@ -63,7 +63,7 @@ brew install akasecurity/tap/aka-claude-tools
 aka-claude-tools
 ```
 
-The npm package brings its own `bun` as a dependency, so command-guard/leak-guard/statusline/rtk-safe
+The npm package brings its own `bun` as a dependency, so command-guard/leak-guard/mcp-guard/statusline/rtk-safe
 work even with no system `bun` on PATH. That bundled `bun` needs its postinstall script, which
 npm 12 blocks by default (`npm i -g` prints an install-scripts warning); allow it with
 `npm i -g --allow-scripts=bun @akasecurity/claude-tools`. When the bundled `bun` can't run, the
@@ -81,7 +81,7 @@ exists.
 git clone git@github.com:akasecurity/claude-tools.git
 cd claude-tools
 ./install.sh             # interactive
-./install.sh --defaults  # accept the recommended six
+./install.sh --defaults  # accept the recommended ten
 ```
 
 Nothing runs on clone. Read the code first if you like. The installer asks where to put
@@ -91,7 +91,7 @@ not a bare sandbox. Prefer a walkthrough? See the [safe-setup carousel](media/de
 
 ### Install as a Claude Code plugin (guards into your active profile)
 
-`claude plugin marketplace add akasecurity/marketplace` then `claude plugin install claude-tools@akasecurity` installs the guard hooks (command-guard, leak-guard) into your **active** profile.
+`claude plugin marketplace add akasecurity/marketplace` then `claude plugin install claude-tools@akasecurity` installs the guard hooks (command-guard, leak-guard, mcp-guard) into your **active** profile.
 
 - **Requires `bun`.** The guards run under bun. They **fail open** — if bun is missing they never
   block your work; instead you get one clear "guards INACTIVE" notice at session start. Install bun
@@ -118,17 +118,20 @@ A guard you haven't watched fire is one you're only assuming works. Launch the p
 
 ## What's inside
 
-<p align="center"><img src="media/whats-inside.svg" alt="Fifteen additions: nine on by default, six opt-in." width="100%"></p>
+<p align="center"><img src="media/whats-inside.svg" alt="What's inside: additions grouped by what they do (graphic not yet refreshed for this release's count)." width="100%"></p>
 
-Fifteen additions; the menu is driven entirely by
+Eighteen additions; the menu is driven entirely by
 [`config/additions.json`](config/additions.json), the single source both install paths read.
 Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.pdf).
 
 | Addition | What it does | Default |
 |---|---|---|
 | `secure-settings` | Denies reads of SSH keys, cloud creds, `.env`, keychains; blocks writes to shell startup files; no auto-loaded MCP servers. | ● on |
+| `sandbox` | Enables Claude Code's native OS-level sandbox, so Bash and every other tool run confined, not just the Read tool. Claude Code's own sandbox already merges `secure-settings`'s Read-deny credential paths into its filesystem restrictions at runtime, so this addition doesn't duplicate that list itself. While selected it owns `sandbox.enabled` (a manual edit back to `false` is warned about and set back to `true` on the next apply — deselect the addition to actually turn the sandbox off). Changes Bash behaviour in every session; needs `bwrap` and `socat` on PATH on Linux (macOS always supported; skipped elsewhere with a notice). | ○ opt-in |
 | `leak-guard` | Scans what the agent sends to the web and blocks anything shaped like a secret. Scanned locally, nothing uploaded to check it. | ● on |
-| `command-guard` | Blocks `curl…\|bash`, edits to your shell startup files, and credentials being shipped out. | ● on |
+| `command-guard` | Blocks `curl…\|bash`, edits to your shell startup files, and credentials being shipped out. An opt-in `CT_TRUSTED_BOOTSTRAP_URLS` allowlist can exempt specific installer-script URLs from the `curl\|bash` block (see [Configuring the opt-in env keys](#configuring-the-opt-in-env-keys) below). | ● on |
+| `mcp-guard` | Applies your MCP server allow/deny lists (`CT_MCP_ALLOW` / `CT_MCP_DENY`) and blocks MCP tool inputs carrying anything shaped like a secret. It runs on every MCP call, so it checks key shapes and your org markers only; trufflehog stays on the Bash and web egress guards, for latency. The plugin install scans only; the lists come with the full kit. | ● on |
+| `prompt-guard` | Scans what YOU just typed, not a tool call: prompt-injection phrasing, a credential paired with a send/upload instruction, and encoded blobs that decode to a shell command. Warns only — never blocks, never edits your prompt, never adds anything to the model's context. | ○ opt-in |
 | `rtk-safe` | Compresses supported standalone commands, including `grep`/`rg` — native flags, exit codes and regex dialect are preserved, but long result sets are **summarised**: you get the first ~25 matches plus an exact count of what was hidden and a `rtk recall` handle to retrieve it. Requires stable [`rtk`](https://github.com/rtk-ai/rtk) ≥ 0.49.0; otherwise leaves commands unchanged. Leaves `head`, `-h`/`--help`, and anything with a shell operator or substitution untouched, and preserves project scripts and interpreter selection. `rg`'s auto-approval requires `command-guard`. | ● on |
 | `statusline` | A status bar with live context-fill and rate-limit gauges. | ● on |
 | `shell-audit` | On-demand, read-only scan of your shell startup for hardcoded creds, risky hooks, and stale aliases. | ● on |
@@ -141,6 +144,50 @@ Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.
 | `feedback-survey-off` | Sets `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` to disable session quality surveys. | ● on |
 | `telemetry-off` | Sets `DISABLE_TELEMETRY`. Opt-in because it disables Remote Control (driving the CLI from a claude.ai session). | ○ opt-in |
 | `autoupdater-off` | Sets `DISABLE_AUTOUPDATER` to stop background updates; `claude update` still works. | ○ opt-in |
+
+### Configuring the opt-in env keys
+
+Four of the additions above read per-environment policy from
+[`shared/aka-claude-tools.config.example`](shared/aka-claude-tools.config.example) (copied to
+`aka-claude-tools.config` in your profile on first install): `leak-guard` and `command-guard`
+(`CT_EGRESS_PATTERNS`), `harness-pointer` (`CT_BLOCKED_CMDS`), `mcp-guard` (`CT_MCP_ALLOW` /
+`CT_MCP_DENY`), and `command-guard`'s bootstrap allowlist (`CT_TRUSTED_BOOTSTRAP_URLS`). Every
+key ships empty, so those policy tiers are inactive until you set one. The guards' built-in
+checks run regardless: `mcp-guard`'s secret scan of every MCP tool input is always on, as are
+the credential scans and structural blocks in `leak-guard` and `command-guard`. Edit the file,
+then re-run `./install.sh` to compile it into the sidecars the hooks read at runtime.
+
+- **`CT_MCP_ALLOW` / `CT_MCP_DENY`** (mcp-guard) — comma-separated MCP **server** names (the
+  segment after `mcp__` in a tool name, e.g. `mcp__searxng__web_search` → `searxng`), matched
+  case-insensitively. `CT_MCP_DENY` always blocks a listed server; a non-empty `CT_MCP_ALLOW`
+  also blocks every server not on it.
+- **`CT_TRUSTED_BOOTSTRAP_URLS`** (command-guard) — space-separated `https://host/path/` prefixes
+  (trailing slash required; the host needs at least two labels, and path segments use only
+  `A-Z a-z 0-9 . _ ~ -`, never `.` or `..`). The **only** exempted shape is `curl <-f/-s/-S in
+  any combination, or --fail/--silent/--show-error, plus --tlsv1.2 and --proto '=https'> <an
+  https URL under one of these prefixes> | bash` (or `| sh`) — one pipe, nothing else on the
+  line. `--proto` takes its value as a separate word (`--proto '=https'`); the joined
+  `--proto=https` form is not accepted. The URL in the command must have at least one path
+  segment under the prefix, so a bare host root such as `https://sh.rustup.rs` is never
+  exempted; allowlist installers served from a real path. For example, with
+  `CT_TRUSTED_BOOTSTRAP_URLS="https://get.example.dev/install/"`, this exact command is
+  allowed:
+
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://get.example.dev/install/setup.sh | sh
+  ```
+
+  Anything wider, including a plain `-L`/`--location` redirect-follow, still blocks. Residual risks worth
+  knowing: curl still reads `~/.curlrc` by default, which can inject flags (including
+  `--location`) invisibly to this allowlist; the sidecar's staleness check only detects that
+  `aka-claude-tools.config` changed since compile, not that the sidecar's rules still match what
+  that config would produce; and a `pathPrefix` of exactly `/` allowlists the **entire host**, not
+  just an install-script directory, so scope it as narrowly as the installer's real URL layout
+  allows.
+
+Full format details and worked examples for all three keys live as comments directly in
+[`shared/aka-claude-tools.config.example`](shared/aka-claude-tools.config.example) — read it before
+setting any of them.
 
 ## Profiles
 

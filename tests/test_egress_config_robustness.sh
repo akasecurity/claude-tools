@@ -46,8 +46,13 @@ assert_ok   "source-error config: sidecar pattern is empty (tier inactive)" \
 #    fine — it must NOT trigger the "tier inactive" warning, and the pattern MUST compile.
 inst $'CT_EGRESS_PATTERNS="acme\\.internal"\nfalse'
 assert_eq   "pattern-set-but-nonzero-exit config: install exits 0" "0" "$RC"
-assert_ngrep "pattern-set-but-nonzero-exit: NO misleading inactive warning" \
-  'could not be sourced' "$SB/log"
+# NOTE: this fixture never sets CT_MCP_ALLOW/CT_MCP_DENY/CT_TRUSTED_BOOTSTRAP_URLS, so
+# compile_mcp_policy_sidecar/compile_bootstrap_sidecar (also sourcing this same config,
+# since mcp-policy.json rides on the leak-guard gate too) correctly warn THEIR OWN
+# "could not be sourced" for THEIR OWN tiers — a bare substring check would now catch
+# that unrelated, legitimate warning, so this asserts the ORG-EGRESS message specifically.
+assert_ngrep "pattern-set-but-nonzero-exit: NO misleading org-egress inactive warning" \
+  'org-egress patterns NOT compiled' "$SB/log"
 assert_ok   "pattern-set-but-nonzero-exit: pattern still compiled" \
   bash -c "jq -e '.pattern|contains(\"acme\")' '$PROFILE/hooks/lib/org-egress.json' >/dev/null"
 

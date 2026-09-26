@@ -114,7 +114,7 @@ ensure_dep jq "jq (required)" 1
 # (engine) mode, which is invoked programmatically and only needs jq.
 if [ "$CT_APPLY" != "1" ] && [ "$CT_ALIAS_MODE" != "1" ] && [ "$CT_DELETE_ALIAS" != "1" ] && [ "$CT_ENUMERATE" != "1" ]; then
   command -v claude >/dev/null 2>&1 || warn "claude CLI not found on PATH — the alias will still be written, but install Claude Code to use it."
-  # bun (command-guard) and trufflehog (leak-guard) are checked/offered when those
+  # bun (the guard hooks) and trufflehog (the secret scans) are checked/offered when those
   # additions are selected — see the build step below.
 
   say ""
@@ -376,6 +376,25 @@ prune_perms_env() {
         else . end )'
 }
 
+# prune_sandbox  (settings json on stdin → pruned on stdout)
+# sandbox.enabled is a SINGLETON value the merge OVERWRITES (like .statusLine), so
+# deselecting it can't just delete the key — that would clobber a value the user had
+# BEFORE this addition ever touched their profile. Mirrors the statusLine stash/restore
+# pattern (see the reconcile step in apply_additions, which stashes the pre-install value
+# into the hidden `_aka_prior_sandbox_enabled` marker the first time this addition is
+# selected): restore that marker if present, else the key was never anything but the
+# kit's own, so just remove it. Cleans up the now-empty .sandbox object only when nothing
+# else is left under it, so a sibling key the user set themselves
+# (sandbox.network.allowLocalBinding, say) survives untouched.
+prune_sandbox() {
+  jq '
+    if has("_aka_prior_sandbox_enabled")
+    then .sandbox.enabled = ._aka_prior_sandbox_enabled | del(._aka_prior_sandbox_enabled)
+    else del(.sandbox.enabled) end
+    | (if (.sandbox // {}) == {} then del(.sandbox) else . end)
+  '
+}
+
 # addition_owned_paths <id> <config_dir> → echo the files/dirs the addition owns.
 addition_owned_paths() {
   local id="$1" cfg="$2" key rel
@@ -411,6 +430,17 @@ prune_addition_from_settings() {
   # install; prune_statusline only drops the statusLine command, so remove that pinned
   # preference too (it is the only thing the kit writes under .preferences).
   [ "$id" = "statusline" ] && s="$(printf '%s' "$s" | jq 'if (.preferences|type)=="object" then (del(.preferences.location) | (if (.preferences=={}) then del(.preferences) else . end)) else . end')"
+  # Ownership gate: this prune runs for every UNSELECTED id on every apply, so it only
+  # touches sandbox.enabled when the kit actually set it — the sandbox_installed meta
+  # flag, or a stash left by a select. A value the user set on a profile where the
+  # addition was never selected (or set by hand after a deselect) is theirs and stays.
+  if [ "$id" = "sandbox" ]; then
+    if [ "$(meta_get "$config_dir" sandbox_installed)" = "1" ] \
+       || printf '%s' "$s" | jq -e 'has("_aka_prior_sandbox_enabled")' >/dev/null 2>&1; then
+      s="$(printf '%s' "$s" | prune_sandbox)"
+      meta_set "$config_dir" sandbox_installed 0
+    fi
+  fi
   [ -n "$setf" ] && [ -f "$CONFIG_SRC/$setf" ] && s="$(printf '%s' "$s" | prune_perms_env "$CONFIG_SRC/$setf")"
   printf '%s' "$s"
 }
@@ -1021,6 +1051,201 @@ compile_org_sidecar() {
   else ok "Compiled org-egress sidecar (no org patterns set — tier inactive)"; fi
 }
 
+# _mcp_server_name_to_json <key> <cfg> <name> — validate ONE MCP server name against
+# the portable identifier subset (^[A-Za-z0-9_-]+$) for compile_mcp_policy_sidecar.
+# die()s naming <key> (never a bare "invalid input") on anything else, including a
+# blank entry from a stray/leading/trailing comma. Prints the name back on success —
+# call sites build the JSON array with jq -R/-s so no shell-side quoting is needed.
+_mcp_server_name_to_json() {
+  local key="$1" cfg="$2" name="$3"
+  case "$name" in
+    ''|*[!A-Za-z0-9_-]*) die "$key in $cfg has an invalid server name \"$name\" (must match ^[A-Za-z0-9_-]+\$)." ;;
+  esac
+  printf '%s\n' "$name"
+}
+
+# compile_mcp_policy_sidecar <config_dir> — compile CT_MCP_ALLOW / CT_MCP_DENY (each a
+# comma-separated list of MCP server names) into hooks/lib/mcp-policy.json, the sidecar
+# mcp-guard reads at runtime. Owned by mcp-guard alone: compiled only when mcp-guard is
+# selected and removed when it is deselected; see the call site and cleanup below.
+# Modeled exactly on compile_org_sidecar: subshell-source, validate, atomic publish.
+# With a second arg `check`, validates only (same die()s), writes nothing and prints
+# nothing: apply_additions runs that preflight BEFORE any write, so an invalid value
+# aborts while the previously installed hooks/lib and its sidecar are still in place
+# (place_dir replaces hooks/lib wholesale, which would otherwise drop a working deny list).
+compile_mcp_policy_sidecar() {
+  local config_dir="$1" mode="${2:-}"
+  local cfg="$config_dir/aka-claude-tools.config"
+  local sidecar="$config_dir/hooks/lib/mcp-policy.json"
+  [ -f "$cfg" ] || return 0
+  [ "$mode" = "check" ] || [ -d "$config_dir/hooks/lib" ] || return 0
+
+  # Source the config in a SUBSHELL (set +eu) exactly like compile_org_sidecar, and
+  # smuggle BOTH values out over one command substitution using \x1f (a byte that
+  # can never survive the name validation below, so it's a safe internal separator).
+  local raw="" _src_rc=0
+  raw="$( set +eu; . "$cfg" >/dev/null 2>&1; _rc=$?; printf '%s\x1f%s' "${CT_MCP_ALLOW:-}" "${CT_MCP_DENY:-}"; exit "$_rc" )" || _src_rc=$?
+  local allow_raw="${raw%%$'\x1f'*}" deny_raw="${raw#*$'\x1f'}"
+  # Mirror compile_org_sidecar's two-branch warning EXACTLY: warn on every source
+  # failure, not just one where a value happened to already be captured — a config
+  # that errors before CT_MCP_ALLOW/CT_MCP_DENY are ever reached must not compile a
+  # silently-empty (fail-open) sidecar with no signal.
+  if [ "$_src_rc" -ne 0 ] && [ "$mode" != "check" ]; then
+    if [ -z "$allow_raw" ] && [ -z "$deny_raw" ]; then
+      warn "aka-claude-tools.config could not be sourced (exit $_src_rc) — CT_MCP_ALLOW/CT_MCP_DENY NOT compiled; the MCP policy tier is INACTIVE until you fix the config and re-run ./install.sh."
+    else
+      warn "aka-claude-tools.config sourced with an error (exit $_src_rc) — a CT_MCP_ALLOW/CT_MCP_DENY value was set and compiled, but part of the config did not run. Review the config and re-run ./install.sh."
+    fi
+  fi
+  case "$allow_raw" in *$'\n'*) die "CT_MCP_ALLOW in $cfg must be a single line (multiline values are rejected)." ;; esac
+  case "$deny_raw"  in *$'\n'*) die "CT_MCP_DENY in $cfg must be a single line (multiline values are rejected)." ;; esac
+
+  local allow_json="[]" deny_json="[]"
+  if [ -n "$allow_raw" ]; then
+    # A leading/trailing/doubled comma splits to an EMPTY array element under most
+    # IFS splits, but bash's word splitting drops a *trailing* empty field outright
+    # (matching plain IFS-whitespace behavior) — so a trailing comma would silently
+    # vanish instead of reaching _mcp_server_name_to_json's blank-entry check below.
+    # Catch all three shapes here, in the raw string, before that field loss can happen.
+    case "$allow_raw" in
+      ,*|*,|*,,*) die "CT_MCP_ALLOW in $cfg has an empty entry (a leading, trailing, or doubled comma)." ;;
+    esac
+    local IFS=,; set -f; local -a _names=($allow_raw); set +f; unset IFS
+    local n; local -a _out=()
+    for n in "${_names[@]}"; do _out+=("$(_mcp_server_name_to_json "CT_MCP_ALLOW" "$cfg" "$n")"); done
+    allow_json="$(printf '%s\n' "${_out[@]}" | jq -R . | jq -s -c .)"
+  fi
+  if [ -n "$deny_raw" ]; then
+    case "$deny_raw" in
+      ,*|*,|*,,*) die "CT_MCP_DENY in $cfg has an empty entry (a leading, trailing, or doubled comma)." ;;
+    esac
+    local IFS=,; set -f; local -a _names=($deny_raw); set +f; unset IFS
+    local n; local -a _out=()
+    for n in "${_names[@]}"; do _out+=("$(_mcp_server_name_to_json "CT_MCP_DENY" "$cfg" "$n")"); done
+    deny_json="$(printf '%s\n' "${_out[@]}" | jq -R . | jq -s -c .)"
+  fi
+  [ "$mode" = "check" ] && return 0
+
+  # sourceHash: same portable sha256-over-raw-bytes as compile_org_sidecar, so
+  # mcp-guard can re-derive it with bun's createHash over the identical bytes.
+  local hash=""
+  hash="$(sha256_file "$cfg" 2>/dev/null || true)"
+
+  local tmp="$sidecar.tmp.$$"
+  jq -n --argjson a "$allow_json" --argjson d "$deny_json" --arg h "$hash" \
+    '{allow:$a, deny:$d, sourceHash:$h}' > "$tmp" && mv -f "$tmp" "$sidecar"
+  if [ -n "$allow_raw$deny_raw" ]; then ok "Compiled MCP policy sidecar (CT_MCP_ALLOW/CT_MCP_DENY active)";
+  else ok "Compiled MCP policy sidecar (no MCP policy set — inactive)"; fi
+}
+
+# _bootstrap_url_to_rule <key> <cfg> <url> — validate ONE trusted-bootstrap URL for
+# compile_bootstrap_sidecar and print back "<lowercased-host>\t<path>" on success.
+# die()s naming <key>, never a bare "invalid input", on any violation:
+#   - must be https://, with a non-empty host and a path
+#   - path must end in / (a prefix, not a specific file)
+#   - no userinfo (@) and no port (:) in the authority
+#   - none of ?#{}[]\ or any whitespace anywhere in the URL
+#   - host limited to the portable hostname subset ([A-Za-z0-9.-]+), lowercased for
+#     the sidecar since hostnames are case-insensitive
+#   - and exactly what guard-core's validRule accepts: a host of two or more labels,
+#     path segments of [A-Za-z0-9._~-] only, no `.`/`..` segments
+_bootstrap_url_to_rule() {
+  local key="$1" cfg="$2" url="$3"
+  case "$url" in
+    *[\?\#\{\}\[\]\\]*|*[[:space:]]*)
+      die "$key in $cfg has an invalid URL \"$url\" (must not contain ?, #, {, }, [, ], \\, or whitespace)." ;;
+  esac
+  case "$url" in
+    https://?*) ;;
+    *) die "$key in $cfg has an invalid URL \"$url\" (must start with https:// and name a host)." ;;
+  esac
+  local rest="${url#https://}"
+  case "$rest" in
+    */*) ;;
+    *) die "$key in $cfg has an invalid URL \"$url\" (missing a path — must end in /)." ;;
+  esac
+  case "$url" in
+    */) ;;
+    *) die "$key in $cfg has an invalid URL \"$url\" (path must end in /)." ;;
+  esac
+  local authority="${rest%%/*}" path="/${rest#*/}"
+  case "$authority" in
+    *@*) die "$key in $cfg has an invalid URL \"$url\" (userinfo (@) in the host is not allowed)." ;;
+  esac
+  case "$authority" in
+    *:*) die "$key in $cfg has an invalid URL \"$url\" (a port in the host is not allowed)." ;;
+  esac
+  case "$authority" in
+    ''|*[!A-Za-z0-9.-]*) die "$key in $cfg has an invalid URL \"$url\" (host has invalid characters)." ;;
+  esac
+  # Mirror guard-core's validRule exactly, so a rule the runtime would silently drop
+  # never compiles: a dotted host of two or more non-empty labels (HOST_RE), a path of
+  # non-empty [A-Za-z0-9._~-] segments each ending in / (PREFIX_RE), and no `.`/`..`
+  # segment (dotSegment).
+  [[ "$authority" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] \
+    || die "$key in $cfg has an invalid URL \"$url\" (host must be a dotted name such as get.example.dev; single-label hosts like localhost are not allowed)."
+  [[ "$path" =~ ^/([A-Za-z0-9._~-]+/)*$ ]] \
+    || die "$key in $cfg has an invalid URL \"$url\" (path may contain only A-Z a-z 0-9 . _ ~ - and /, with no empty segments)."
+  case "/$path/" in
+    */./*|*/../*) die "$key in $cfg has an invalid URL \"$url\" (path must not contain . or .. segments)." ;;
+  esac
+  local host_lc
+  host_lc="$(printf '%s' "$authority" | tr 'A-Z' 'a-z')"
+  printf '%s\t%s' "$host_lc" "$path"
+}
+
+# compile_bootstrap_sidecar <config_dir> — compile CT_TRUSTED_BOOTSTRAP_URLS (a
+# space-separated allowlist of installer-script URLs) into
+# hooks/lib/trusted-bootstrap.json, the sidecar command-guard reads at runtime.
+# Modeled exactly on compile_org_sidecar: subshell-source, validate, atomic publish.
+# Owned by command-guard alone (unlike the shared egress libs above) — placed and
+# removed with command-guard specifically; see the call site and cleanup below.
+# `check` second arg: validate only, write nothing (see compile_mcp_policy_sidecar).
+compile_bootstrap_sidecar() {
+  local config_dir="$1" mode="${2:-}"
+  local cfg="$config_dir/aka-claude-tools.config"
+  local sidecar="$config_dir/hooks/lib/trusted-bootstrap.json"
+  [ -f "$cfg" ] || return 0
+  [ "$mode" = "check" ] || [ -d "$config_dir/hooks/lib" ] || return 0
+
+  local raw="" _src_rc=0
+  raw="$( set +eu; . "$cfg" >/dev/null 2>&1; _rc=$?; printf '%s' "${CT_TRUSTED_BOOTSTRAP_URLS:-}"; exit "$_rc" )" || _src_rc=$?
+  # Mirror compile_org_sidecar's two-branch warning EXACTLY: warn on every source
+  # failure, not just one where a value happened to already be captured — a config
+  # that errors before CT_TRUSTED_BOOTSTRAP_URLS is ever reached must not compile a
+  # silently-empty (fail-open) sidecar with no signal.
+  if [ "$_src_rc" -ne 0 ] && [ "$mode" != "check" ]; then
+    if [ -z "$raw" ]; then
+      warn "aka-claude-tools.config could not be sourced (exit $_src_rc) — CT_TRUSTED_BOOTSTRAP_URLS NOT compiled; the trusted-bootstrap tier is INACTIVE until you fix the config and re-run ./install.sh."
+    else
+      warn "aka-claude-tools.config sourced with an error (exit $_src_rc) — CT_TRUSTED_BOOTSTRAP_URLS was set and compiled, but part of the config did not run. Review the config and re-run ./install.sh."
+    fi
+  fi
+  case "$raw" in *$'\n'*) die "CT_TRUSTED_BOOTSTRAP_URLS in $cfg must be a single line (multiline values are rejected)." ;; esac
+
+  local rules_json="[]"
+  if [ -n "$raw" ]; then
+    set -f; local -a _urls=($raw); set +f   # default IFS: space/tab; no globbing
+    local u pair host path
+    local -a _entries=()
+    for u in "${_urls[@]}"; do
+      pair="$(_bootstrap_url_to_rule "CT_TRUSTED_BOOTSTRAP_URLS" "$cfg" "$u")"
+      host="${pair%%$'\t'*}"; path="${pair#*$'\t'}"
+      _entries+=("$(jq -nc --arg h "$host" --arg p "$path" '{host:$h, pathPrefix:$p}')")
+    done
+    [ "${#_entries[@]}" -gt 0 ] && rules_json="$(printf '%s\n' "${_entries[@]}" | jq -s -c .)"
+  fi
+  [ "$mode" = "check" ] && return 0
+
+  local hash=""
+  hash="$(sha256_file "$cfg" 2>/dev/null || true)"
+
+  local tmp="$sidecar.tmp.$$"
+  jq -n --argjson r "$rules_json" --arg h "$hash" '{rules:$r, sourceHash:$h}' > "$tmp" && mv -f "$tmp" "$sidecar"
+  if [ -n "$raw" ]; then ok "Compiled trusted-bootstrap sidecar (CT_TRUSTED_BOOTSTRAP_URLS active)";
+  else ok "Compiled trusted-bootstrap sidecar (no trusted bootstrap URLs set — inactive)"; fi
+}
+
 # meta_set <config_dir> <key> <value>  — upsert key=value into
 # <config_dir>/.aka-claude-tools-meta, creating the file if absent and preserving
 # any other key lines. This file MARKS a profile as aka-claude-tools-managed
@@ -1107,21 +1332,34 @@ apply_additions() {
     warn "⚠ leak-guard guards WEB egress only; command-guard (Bash egress) is not selected — your Bash egress is UNGUARDED. Add command-guard to guard outbound Bash commands."
   fi
 
+  # ── sidecar config preflight (runs BEFORE any write) ──
+  # Validate the MCP and trusted-bootstrap keys now, before place_dir replaces
+  # hooks/lib wholesale below. A typo then aborts the re-install with the previously
+  # compiled mcp-policy.json / trusted-bootstrap.json still in place (mcp-guard keeps
+  # enforcing the last-compiled deny list, with its stale-config warning), instead of
+  # dying after the lib was wiped and leaving no policy at all.
+  is_selected mcp-guard "$_sel_ids"     && compile_mcp_policy_sidecar "$config_dir" check
+  is_selected command-guard "$_sel_ids" && compile_bootstrap_sidecar "$config_dir" check
+
   # ── hard-dependency gate ──
   # Runs AFTER selection is known but BEFORE any dir/payload/rc write, so a missing
   # required runtime aborts cleanly with no partial apply (in interactive mode the
   # profile dir isn't created until the build mkdir below; --apply pre-creates an
   # empty dir at apply_entry, which is benign — no settings/payload/rc are written).
-  # command-guard and leak-guard are default-on SECURITY hooks whose runtime is bun;
-  # shipping one silently disabled is not an option, so a missing bun ABORTS rather than
-  # soft-skips. The statusline and rtk-safe are .ts hooks that also cannot run without bun
-  # (they can't degrade like the old bash versions), so bun is required when ANY of the
-  # four is selected — a selection with none still installs. ensure_dep offers to install
-  # bun first (interactive); it die()s only on decline / non-interactive-absent, so a
-  # partial apply is impossible.
+  # command-guard, leak-guard and mcp-guard are default-on SECURITY hooks whose runtime
+  # is bun; shipping one silently disabled is not an option, so a missing bun ABORTS rather
+  # than soft-skips. The statusline, rtk-safe and prompt-guard are .ts hooks that also
+  # cannot run without bun (they can't degrade like the old bash versions), so bun is
+  # required when ANY of the six is selected — a selection with none still installs.
+  # prompt-guard is opt-in and warn-only at RUNTIME, but at INSTALL time it needs the same
+  # gate as the others: the registration below embeds bun's resolved absolute path, and
+  # there is no such path to embed without bun present. ensure_dep offers to install bun
+  # first (interactive); it die()s only on decline / non-interactive-absent, so a partial
+  # apply is impossible.
   if is_selected command-guard "$_sel_ids" || is_selected leak-guard "$_sel_ids" \
+     || is_selected mcp-guard "$_sel_ids" || is_selected prompt-guard "$_sel_ids" \
      || is_selected statusline "$_sel_ids" || is_selected rtk-safe "$_sel_ids"; then
-    ensure_dep bun "bun — required runtime for command-guard, leak-guard, statusline, and/or rtk-safe" 1
+    ensure_dep bun "bun — required runtime for command-guard, leak-guard, mcp-guard, prompt-guard, statusline, and/or rtk-safe" 1
     # Warn ONCE per run (not once per hook below) when the bun about to be baked into
     # every selected hook's absolute path is the one npm installed alongside THIS
     # package (its own node_modules, or the hoisted ../../.bin one level up), not a
@@ -1161,12 +1399,59 @@ apply_additions() {
   is_selected autoupdater-off      "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.autoupdater-off.json")"
   is_selected feedback-survey-off  "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.feedback-survey-off.json")"
 
+  # Opt-in native sandbox (settings-only, like the toggles above): flips
+  # sandbox.enabled on. Claude Code's OWN documented sandbox.filesystem.denyRead schema
+  # field says it is "Merged with paths from Read(...) deny permission rules" — i.e. the
+  # runtime already folds settings.base.json's Read(...) credential denies into the
+  # sandbox's effective filesystem denylist on its own, with the correct (permission-
+  # rule) glob resolution. This addition deliberately does NOT also write an explicit
+  # sandbox.filesystem.denyRead: a kit-computed list of the SAME `Read(<path>)` strings
+  # written verbatim into that field would be re-resolved under sandbox.filesystem's own
+  # (different, narrower) path rules — entries with no `/`, `~/` or `./` prefix
+  # (`**/.env`, `**/.env.local`, `**/.env.*.local`) resolve relative to the settings
+  # file root (~/.claude for user settings) instead of matching project-relative, so
+  # they'd silently fail to deny anything real. Enabling the sandbox and leaving denyRead
+  # to Claude Code's own merge gets the credential protection with the semantics that
+  # actually work for those three glob rules.
+  # Platform-gated: sandbox-exec ships with macOS (always supported); the Linux
+  # backend needs both `bwrap` (bubblewrap) and `socat` (its network proxy) on PATH —
+  # Claude Code reports "sandbox is enabled but dependencies are missing" and names
+  # either one when absent. CT_UNAME lets tests force the OS check without faking
+  # `uname` on PATH. Any other OS, or Linux missing either tool, skips with a notice
+  # (soft-skip, never die — this addition is opt-in, so an unsupported host just
+  # doesn't get it rather than aborting the whole install). `_sb_supported` is read
+  # again later (after `existing` is loaded) by the stash/restore reconcile step, so it's
+  # a plain function-local var, not re-derived.
+  local _sb_supported=0
+  if is_selected sandbox "$_sel_ids"; then
+    local _sb_os; _sb_os="${CT_UNAME:-$(uname -s)}"
+    local _sb_missing=""
+    case "$_sb_os" in
+      Darwin) _sb_supported=1 ;;
+      Linux)
+        command -v bwrap >/dev/null 2>&1 || _sb_missing="bubblewrap (bwrap)"
+        command -v socat >/dev/null 2>&1 || _sb_missing="${_sb_missing:+$_sb_missing and }socat"
+        [ -z "$_sb_missing" ] && _sb_supported=1 ;;
+    esac
+    if [ "$_sb_supported" = "1" ]; then
+      add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.sandbox.json")"
+    elif [ -n "$_sb_missing" ]; then
+      warn "sandbox: ${_sb_missing} not found; sandbox addition skipped."
+    else
+      warn "sandbox: unsupported OS (${_sb_os}); sandbox addition skipped."
+    fi
+  fi
+
   # Shared library the egress guards read (single source of truth for the
   # secret/outbound patterns) and the vendored guard-core (every bun guard hook).
   # Placed whenever any consumer is selected, so bash and TS both resolve
   # config/hooks/lib/{secret-patterns.json,guard-core.js} relative to themselves.
+  # prompt-guard reads the same secret-patterns.json (for its credential-pairing tier)
+  # and guard-core.js (scanPrompt, detectAitc), so it's a consumer too — its own missing-
+  # patterns/missing-core paths just degrade silently rather than failing closed.
   if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" \
-    || is_selected rtk-safe "$_sel_ids"; then
+    || is_selected mcp-guard "$_sel_ids" || is_selected rtk-safe "$_sel_ids" \
+    || is_selected prompt-guard "$_sel_ids"; then
     place_dir "$CONFIG_SRC/hooks/lib" "$config_dir/hooks"
   fi
 
@@ -1208,6 +1493,36 @@ apply_additions() {
     # Optional: stronger Bash secret detection (command-guard runs trufflehog on
     # outbound commands, like leak-guard does for web). Degrades to regex tiers without it.
     ensure_dep trufflehog "trufflehog (command-guard secret detection)" 0 || true
+  fi
+  if is_selected mcp-guard "$_sel_ids"; then
+    # bun is guaranteed present here — the hard-dependency gate above aborts the install
+    # if mcp-guard is selected without bun (a default-on security guard is never shipped
+    # silently disabled).
+    local bun_bin; bun_bin="$(command -v bun)"
+    place_file "$CONFIG_SRC/hooks/mcp-guard.ts" "$config_dir/hooks" +x
+    # Registered on every MCP tool. Overlaps leak-guard on mcp__searxng__* by design:
+    # leak-guard scans those as web egress, mcp-guard applies the server policy to them.
+    # Register with bun's ABSOLUTE path (same two-token quoted shape as command-guard/
+    # leak-guard): both tokens shq()-quoted so spaces/metachars/quotes don't split.
+    add="$(jq --arg cmd "$(shq "$bun_bin") $cqd/hooks/mcp-guard.ts" \
+      '.hooks.PreToolUse += [{matcher:"mcp__.*",hooks:[{type:"command",command:$cmd}]}]' <<<"$add")"
+    ok "mcp-guard enabled (bun: $bun_bin)"
+    # No trufflehog offer here: mcp-guard runs the regex tiers only (it fires on every
+    # MCP call, so trufflehog's per-call cost stays on the Bash and web egress guards).
+  fi
+  if is_selected prompt-guard "$_sel_ids"; then
+    # bun is guaranteed present here — the hard-dependency gate above aborts the install
+    # if prompt-guard is selected without bun (the .ts can't degrade-run, same as the
+    # other bun hooks). Opt-in and warn-only: no trufflehog offer (it never scans for
+    # verified secrets, only key shapes), and no dangerous-flag heads-up (it never blocks).
+    local bun_bin; bun_bin="$(command -v bun)"
+    place_file "$CONFIG_SRC/hooks/prompt-guard.ts" "$config_dir/hooks" +x
+    # UserPromptSubmit has no matcher (it fires on every submitted prompt, not a tool
+    # call). Register with bun's ABSOLUTE path (same two-token quoted shape as the other
+    # bun hooks): both tokens shq()-quoted so spaces/metachars/quotes don't split.
+    add="$(jq --arg cmd "$(shq "$bun_bin") $cqd/hooks/prompt-guard.ts" \
+      '.hooks.UserPromptSubmit += [{hooks:[{type:"command",command:$cmd}]}]' <<<"$add")"
+    ok "prompt-guard enabled (bun: $bun_bin)"
   fi
   if is_selected rtk-safe "$_sel_ids"; then
     # bun is guaranteed present here — the hard-dependency gate above aborts the install
@@ -1310,17 +1625,31 @@ apply_additions() {
   # away — is false under -e, so we (re)place the template. The rm -f first clears that
   # broken link, otherwise `cp` would follow it to the missing target and abort the whole
   # install under set -e. A valid symlink to a real config is true under -e → left alone.
-  if { is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" || is_selected harness-pointer "$_sel_ids"; } \
+  if { is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" \
+       || is_selected mcp-guard "$_sel_ids" || is_selected harness-pointer "$_sel_ids"; } \
      && [ ! -e "$config_dir/aka-claude-tools.config" ]; then
     rm -f "$config_dir/aka-claude-tools.config"
     cp "$REPO_DIR/shared/aka-claude-tools.config.example" "$config_dir/aka-claude-tools.config"
     ok "Placed aka-claude-tools.config (opt-in, empty by default)"
   fi
-  # Compile the org-egress sidecar that BOTH egress guards read at runtime, so neither
-  # ever sources the shell config (a bun process can't safely evaluate arbitrary
-  # shell). Validated + atomically published. Whenever an egress guard is selected.
-  if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids"; then
+  # Compile the org-egress sidecar that every egress guard (leak-guard, command-guard,
+  # mcp-guard) reads at runtime, so none ever sources the shell config (a bun process
+  # can't safely evaluate arbitrary shell). Validated + atomically published. Whenever
+  # an egress guard is selected.
+  if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" \
+    || is_selected mcp-guard "$_sel_ids"; then
     compile_org_sidecar "$config_dir"
+  fi
+  # mcp-policy.json is owned by mcp-guard alone (the MCP server allow/deny lists), so
+  # it's compiled only when mcp-guard itself is selected.
+  if is_selected mcp-guard "$_sel_ids"; then
+    compile_mcp_policy_sidecar "$config_dir"
+  fi
+  # trusted-bootstrap.json is owned by command-guard alone (it validates bootstrap
+  # script URLs before letting a curl|sh-style command through), so it's compiled
+  # only when command-guard itself is selected — not on a leak-guard-only install.
+  if is_selected command-guard "$_sel_ids"; then
+    compile_bootstrap_sidecar "$config_dir"
   fi
 
   # 4d. merge settings (existing-in-dir ∪ additions) and write
@@ -1449,15 +1778,56 @@ apply_additions() {
     fi
   fi
 
+  # 4d-pre1c. Reconcile .sandbox.enabled, now that $existing is loaded — same
+  # singleton-overwrite problem as statusLine above (the merge OVERWRITES a scalar,
+  # never unions it). Two distinct cases, both keyed on the `sandbox_installed` meta
+  # flag (a plain boolean carries no fingerprint to tell "the kit's own true from a
+  # re-apply" apart from "the user's own true" by VALUE alone, unlike statusLine's
+  # command string, so identity is tracked in `.aka-claude-tools-meta` instead):
+  #
+  #   • NOT already installed (first time this addition is ever applied here): stash
+  #     whatever prior value is present (once — `_sb_has_stash` guards a stash already
+  #     in place) into `_aka_prior_sandbox_enabled`, restored on deselect (prune_sandbox).
+  #   • ALREADY installed (a prior apply set sandbox.enabled=true and recorded the meta
+  #     flag): sandbox.enabled belongs to a SELECTED sandbox addition, same as any other
+  #     kit-managed setting — a re-apply is EXPECTED to keep it true. But "belongs to the
+  #     kit" must never mean "silently overwritten": if it's anything other than `true`
+  #     right now (a manual edit back to false, most likely), warn plainly, by value,
+  #     before the merge below sets it back — never a silent clobber.
+  #
+  # Gated on `_sb_supported` (set above): a skipped-platform run touches nothing here,
+  # exactly like it adds nothing to `add`.
+  if is_selected sandbox "$_sel_ids" && [ "$_sb_supported" = "1" ]; then
+    local _sb_has_stash=0 _sb_prev_installed
+    if [ "$existing" != "{}" ]; then
+      printf '%s' "$existing" | jq -e 'has("_aka_prior_sandbox_enabled")' >/dev/null 2>&1 && _sb_has_stash=1
+    fi
+    _sb_prev_installed="$(meta_get "$config_dir" sandbox_installed)"
+    if [ "$_sb_prev_installed" = "1" ]; then
+      if printf '%s' "$existing" | jq -e '(.sandbox|type)=="object" and (.sandbox|has("enabled"))' >/dev/null 2>&1; then
+        local _sb_cur; _sb_cur="$(printf '%s' "$existing" | jq -r '.sandbox.enabled | tostring')"
+        [ "$_sb_cur" != "true" ] && warn "sandbox: sandbox.enabled was ${_sb_cur}; set back to true because the sandbox addition is selected (deselect it to turn the sandbox off)."
+      fi
+    elif [ "$_sb_has_stash" = "0" ] \
+       && printf '%s' "$existing" | jq -e '.sandbox.enabled != null' >/dev/null 2>&1; then
+      warn "Replacing your existing sandbox.enabled with the kit's — your previous value is saved and restored if you later deselect 'sandbox'."
+      existing="$(printf '%s' "$existing" | jq '._aka_prior_sandbox_enabled = .sandbox.enabled')"
+    fi
+    meta_set "$config_dir" sandbox_installed 1
+  fi
+
   # 4d-pre1a. The shared egress-guard libs (hooks/lib/secret-patterns.json and the
   # compiled hooks/lib/org-egress.json sidecar) are owned by NO single addition — they're
-  # placed/compiled whenever EITHER leak-guard or command-guard is selected. The
-  # per-addition deselect loop above can't remove them (neither guard's owned-paths list
-  # includes them), so deselecting BOTH guards would orphan them. Remove both only when
-  # NEITHER consumer remains. The vendored guard-core has a wider consumer set (every
-  # bun guard hook, including rtk-safe), so it's cleaned up separately below — only once
-  # NO consumer remains does the now-empty hooks/lib dir come down.
-  if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids"; then
+  # placed/compiled whenever any egress guard (leak-guard, command-guard, mcp-guard) or
+  # prompt-guard (its credential-pairing tier reads secret-patterns.json too) is
+  # selected. The per-addition deselect loop above can't remove them (no guard's
+  # owned-paths list includes them), so deselecting every guard would orphan them.
+  # Remove both only when NO consumer remains. The vendored guard-core has a wider
+  # consumer set still (every bun guard hook, including rtk-safe), so it's cleaned up
+  # separately below — only once NO consumer remains does the now-empty hooks/lib dir
+  # come down.
+  if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids" \
+    && ! is_selected mcp-guard "$_sel_ids" && ! is_selected prompt-guard "$_sel_ids"; then
     _egress_lib_removed=
     for _lib in secret-patterns.json org-egress.json; do
       if [ -e "$config_dir/hooks/lib/$_lib" ]; then
@@ -1467,8 +1837,24 @@ apply_additions() {
     done
     [ -n "$_egress_lib_removed" ] && ok "Removed shared egress-guard lib (no guard selected)"
   fi
+  # trusted-bootstrap.json is owned by command-guard alone (see the compile call
+  # site above) — remove it whenever command-guard itself is deselected, regardless
+  # of leak-guard's state.
+  if ! is_selected command-guard "$_sel_ids" \
+    && [ -e "$config_dir/hooks/lib/trusted-bootstrap.json" ]; then
+    rm -f "$config_dir/hooks/lib/trusted-bootstrap.json"
+    ok "Removed trusted-bootstrap sidecar (command-guard not selected)"
+  fi
+  # mcp-policy.json is owned by mcp-guard alone (see the compile call site above) —
+  # remove it whenever mcp-guard itself is deselected, regardless of the other guards.
+  if ! is_selected mcp-guard "$_sel_ids" \
+    && [ -e "$config_dir/hooks/lib/mcp-policy.json" ]; then
+    rm -f "$config_dir/hooks/lib/mcp-policy.json"
+    ok "Removed MCP policy sidecar (mcp-guard not selected)"
+  fi
   if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids" \
-    && ! is_selected rtk-safe "$_sel_ids"; then
+    && ! is_selected mcp-guard "$_sel_ids" && ! is_selected rtk-safe "$_sel_ids" \
+    && ! is_selected prompt-guard "$_sel_ids"; then
     rm -f "$config_dir/hooks/lib/guard-core.js" "$config_dir/hooks/lib/guard-core.d.ts" \
       "$config_dir/hooks/lib/guard-core.lock.json"
     rmdir "$config_dir/hooks/lib" 2>/dev/null || true

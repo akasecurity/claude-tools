@@ -1,6 +1,6 @@
 // @bun
 // package.json
-var version = "0.2.2";
+var version = "0.3.1";
 // src/shell/tokenize.ts
 var TOKENIZE_MAX_DEPTH = 40;
 function extractParen(s, from) {
@@ -196,6 +196,84 @@ function tokenize(cmd, depth = 0) {
   }
   flush();
   return toks;
+}
+
+// src/shell/bootstrap.ts
+var RAW_OK = /^[A-Za-z0-9 \t._~/:=|'"-]+$/;
+var SHORT_OK = new Set(["f", "s", "S"]);
+var LONG_OK = new Set(["--fail", "--silent", "--show-error", "--tlsv1.2"]);
+var HOST_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
+var SEGMENT = "[A-Za-z0-9._~-]+";
+var PREFIX_RE = new RegExp(`^/(?:${SEGMENT}/)*$`);
+var URL_RE = new RegExp(`^https://([A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+)((?:/${SEGMENT})+)$`);
+var dotSegment = (p) => p.split("/").some((seg) => seg === "." || seg === "..");
+function validRule(r) {
+  if (!r || typeof r !== "object")
+    return false;
+  const { host, pathPrefix } = r;
+  return typeof host === "string" && HOST_RE.test(host) && typeof pathPrefix === "string" && PREFIX_RE.test(pathPrefix) && !dotSegment(pathPrefix);
+}
+function urlAllowed(raw, rules) {
+  const m = URL_RE.exec(raw);
+  if (!m)
+    return false;
+  const host = m[1].toLowerCase();
+  const path = m[2];
+  if (dotSegment(path))
+    return false;
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:" || u.username || u.password || u.port || u.search || u.hash)
+    return false;
+  if (u.hostname !== host || u.pathname !== path)
+    return false;
+  return rules.some((r) => host === r.host.toLowerCase() && path.startsWith(r.pathPrefix));
+}
+function bootstrapExempt(command, toks, rules) {
+  if (!Array.isArray(rules))
+    return false;
+  const valid = rules.filter(validRule);
+  if (valid.length === 0)
+    return false;
+  if (!RAW_OK.test(command))
+    return false;
+  const ops = toks.filter((t) => t.op);
+  if (ops.length !== 1 || ops[0].v !== "|")
+    return false;
+  const pipeAt = toks.indexOf(ops[0]);
+  const left = toks.slice(0, pipeAt).map((t) => t.v);
+  const right = toks.slice(pipeAt + 1).map((t) => t.v);
+  if (right.length !== 1 || right[0] !== "bash" && right[0] !== "sh")
+    return false;
+  if (left[0] !== "curl")
+    return false;
+  let url = null;
+  for (let i = 1;i < left.length; i++) {
+    const a = left[i];
+    if (a === "--proto") {
+      if (left[i + 1] !== "=https")
+        return false;
+      i++;
+      continue;
+    }
+    if (LONG_OK.has(a))
+      continue;
+    if (/^-[A-Za-z]+$/.test(a)) {
+      if ([...a.slice(1)].every((c) => SHORT_OK.has(c)))
+        continue;
+      return false;
+    }
+    if (a.startsWith("-"))
+      return false;
+    if (url !== null)
+      return false;
+    url = a;
+  }
+  return url !== null && urlAllowed(url, valid);
 }
 
 // src/shell/detectors.ts
@@ -471,11 +549,12 @@ function detectStartupWrite(toks) {
   }
   return false;
 }
-function structuralChecks(command) {
+function structuralChecks(command, opts = {}) {
   try {
     const toks = tokenize(command);
+    const pipe = detectPipeToShell(toks);
     return {
-      pipeToShell: detectPipeToShell(toks),
+      pipeToShell: pipe && !bootstrapExempt(command, toks, opts?.trustedBootstrap ?? []),
       startupWrite: detectStartupWrite(toks),
       searchExec: detectSearchExec(toks),
       degraded: false
@@ -559,7 +638,10 @@ var REASONS = {
   "patterns-unavailable": "the secret patterns are missing or corrupt, so the egress scan can't run. Blocking as a precaution; reinstall to restore them.",
   "secret-detected": "contains a detected secret. Reference it via an environment variable instead of pasting the literal value.",
   "org-marker": "matches an internal identifier from your org egress config (hostname, IP, path, or username). Describe it generically instead.",
-  "credential-shape": "contains a credential value sent via an outbound tool."
+  "credential-shape": "contains a credential value sent via an outbound tool.",
+  "mcp-server-denied": "this MCP server is denied by policy.",
+  "mcp-server-not-allowed": "this MCP server is not on the allow list.",
+  "mcp-input-unscannable": "MCP tool input has too many fields, is too large, or is too deeply nested to scan."
 };
 var block = (rule, notices, reason = REASONS[rule], detail) => ({ kind: "block", rule, reason, notices, ...detail === undefined ? {} : { detail } });
 function scannerNotice() {
@@ -582,7 +664,7 @@ function evaluateBash(command, ctx = {}) {
   const notices = [];
   if (!command)
     return { kind: "allow", notices };
-  const s = structuralChecks(command);
+  const s = structuralChecks(command, { trustedBootstrap: ctx.trustedBootstrap });
   if (s.degraded)
     notices.push({ level: "warn", code: "parse-degraded", message: "command too complex to parse precisely; strict structural checks applied." });
   if (s.pipeToShell)
@@ -637,6 +719,94 @@ function evaluateWebQuery(text, ctx = {}) {
   if (patterns.credAny.test(text))
     return block("credential-shape", notices, "contains a token or key value.");
   return { kind: "allow", notices };
+}
+// src/mcp.ts
+var MAX_DEPTH = 32;
+var MAX_LEAVES = 200000;
+var MAX_CHARS = 1e6;
+function mcpServerOf(tool) {
+  if (!tool.startsWith("mcp__"))
+    return null;
+  const rest = tool.slice(5);
+  const i = rest.indexOf("__");
+  return i > 0 ? rest.slice(0, i) : null;
+}
+function isPlainObject(v) {
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+function flatten(input) {
+  const out = [];
+  let chars = 0;
+  const onPath = new WeakSet;
+  const done = new WeakSet;
+  function pushLeaf(v) {
+    out.push(v);
+    chars += v.length;
+    return out.length > MAX_LEAVES || chars > MAX_CHARS;
+  }
+  function walk(v, depth) {
+    if (depth > MAX_DEPTH)
+      return true;
+    if (typeof v === "string")
+      return pushLeaf(v);
+    if (v === null || typeof v !== "object")
+      return false;
+    const obj = v;
+    if (onPath.has(obj))
+      return true;
+    if (done.has(obj))
+      return false;
+    if (Array.isArray(obj)) {
+      onPath.add(obj);
+      for (const x of obj) {
+        if (walk(x, depth + 1)) {
+          onPath.delete(obj);
+          return true;
+        }
+      }
+      onPath.delete(obj);
+      done.add(obj);
+      return false;
+    }
+    if (!isPlainObject(obj))
+      return true;
+    onPath.add(obj);
+    for (const [k, val] of Object.entries(obj)) {
+      if (pushLeaf(k)) {
+        onPath.delete(obj);
+        return true;
+      }
+      if (walk(val, depth + 1)) {
+        onPath.delete(obj);
+        return true;
+      }
+    }
+    onPath.delete(obj);
+    done.add(obj);
+    return false;
+  }
+  return walk(input, 0) ? null : out;
+}
+var block2 = (rule, reason, notices = []) => ({ kind: "block", rule, reason, notices });
+function evaluateMcpInput(tool, input, ctx = {}) {
+  const server = mcpServerOf(tool);
+  const serverLower = server?.toLowerCase();
+  const deny = (ctx.mcp?.deny ?? []).map((s) => s.toLowerCase());
+  const allow = (ctx.mcp?.allow ?? []).map((s) => s.toLowerCase());
+  if (serverLower && deny.includes(serverLower))
+    return block2("mcp-server-denied", `MCP server "${server}" is denied by policy.`);
+  if (serverLower && allow.length > 0 && !allow.includes(serverLower))
+    return block2("mcp-server-not-allowed", `MCP server "${server}" is not on the allow list.`);
+  if (!serverLower && allow.length > 0)
+    return block2("mcp-server-not-allowed", "MCP tool name has no server segment; blocked by the allow list.");
+  if (ctx.scanSecrets === false)
+    return { kind: "allow", notices: [] };
+  const leaves = flatten(input);
+  if (leaves === null)
+    return block2("mcp-input-unscannable", "MCP tool input has too many fields, is too large, or is too deeply nested to scan.");
+  return evaluateWebQuery(leaves.join(`
+`), ctx);
 }
 // src/rtk/rewrite.ts
 var ENV_PREFIX = /^([A-Za-z_]\w*=[A-Za-z0-9_./:@%+,=~-]* +)+/;
@@ -937,19 +1107,88 @@ function coexistencePolicy(status) {
     allowRewrite: free
   };
 }
+// src/prompt.ts
+var INJECTION_MARKERS = [
+  /\bignore (?:all |any |the )?(?:previous|prior|above) (?:instructions|prompts?|rules)\b/i,
+  /\bdisregard (?:all |any |the )?(?:previous|prior|above) (?:instructions|rules)\b/i,
+  /\byou are now (?:in |a |an )?(?:developer|dan|jailbreak|unrestricted)\b/i,
+  /^\s*(?:\[system\]|<system>)/im,
+  /^\s*system:\s*(?:you are|ignore|disregard|new instructions|from now on)\b/im,
+  /\bnew (?:system )?instructions:\s/i
+];
+var EXFIL_VERB = /\b(?:send|post|upload|forward|paste|share|email|exfiltrate|curl|wget)\b/i;
+var B64 = /[A-Za-z0-9+/]{40,}={0,2}/g;
+var HEX = /\b(?:[0-9a-fA-F]{2}){24,}\b/g;
+var SHELLISH = /\b(?:bash|sh|zsh|curl|wget|nc|python3?\s+-c|powershell)\b/;
+var BLOB_SCAN_LIMIT = 200000;
+var MAX_BLOB_DECODES = 50;
+var warn = (code, message) => ({ level: "warn", code, message });
+var credAnyGlobalCache = new WeakMap;
+function credAnyGlobal(pats) {
+  let re = credAnyGlobalCache.get(pats);
+  if (!re) {
+    re = new RegExp(pats.credAny.source, "g");
+    credAnyGlobalCache.set(pats, re);
+  }
+  return re;
+}
+function decodesToShell(blob, enc) {
+  try {
+    const s = Buffer.from(blob, enc).toString("utf8");
+    if (/[^\x09\x0a\x0d\x20-\x7e]/.test(s))
+      return false;
+    return SHELLISH.test(s);
+  } catch {
+    return false;
+  }
+}
+function scanPrompt(text, opts = {}) {
+  const out = [];
+  if (INJECTION_MARKERS.some((re) => re.test(text))) {
+    out.push(warn("prompt-injection-marker", "prompt contains a prompt-injection marker."));
+  }
+  if (opts.injectionOnly)
+    return out;
+  const pats = opts.patterns === undefined ? DEFAULT_PATTERNS : opts.patterns;
+  if (pats && pats.credAny.test(text) && EXFIL_VERB.test(text.replace(credAnyGlobal(pats), " "))) {
+    out.push(warn("prompt-secret-exfil", "prompt pairs a credential value with a send/post/upload instruction."));
+  }
+  const scanRegion = text.length > BLOB_SCAN_LIMIT ? text.slice(0, BLOB_SCAN_LIMIT) : text;
+  const blobs = [];
+  for (const m of scanRegion.matchAll(B64)) {
+    blobs.push([m[0], "base64"]);
+    if (blobs.length >= MAX_BLOB_DECODES)
+      break;
+  }
+  if (blobs.length < MAX_BLOB_DECODES) {
+    for (const m of scanRegion.matchAll(HEX)) {
+      blobs.push([m[0], "hex"]);
+      if (blobs.length >= MAX_BLOB_DECODES)
+        break;
+    }
+  }
+  if (blobs.some(([b, e]) => decodesToShell(b, e))) {
+    out.push(warn("prompt-encoded-shell", "prompt contains an encoded blob that decodes to a shell command."));
+  }
+  return out;
+}
 
 // src/index.ts
 var VERSION = version;
 export {
   AITC_HOOKED_TOOLS,
   DEFAULT_PATTERNS,
+  INJECTION_MARKERS,
   VERSION,
   coexistencePolicy,
   detectAitc,
   evaluateBash,
+  evaluateMcpInput,
   evaluateWebQuery,
+  mcpServerOf,
   parsePatterns,
   rewrite,
+  scanPrompt,
   structuralChecks,
   supportedVersion,
   trufflehogScanner
