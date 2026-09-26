@@ -243,4 +243,31 @@ assert_ok "(h) deny == [] once the key is deleted" \
 assert_ok "(h) rules == [] once the key is deleted" \
   bash -c "jq -e '.rules == []' '$TB' >/dev/null"
 
+# ── (i) a failed re-install keeps the previously compiled MCP deny list. The
+#    config keys are validated before hooks/lib is replaced, so an invalid value
+#    aborts with the old mcp-policy.json (and trusted-bootstrap.json) still in place;
+#    mcp-guard keeps enforcing the last-compiled policy. ──
+inst "command-guard mcp-guard" 'CT_MCP_DENY="bad"
+CT_TRUSTED_BOOTSTRAP_URLS="https://get.example.dev/install/"'
+assert_ok "(i) initial install with CT_MCP_DENY=bad succeeds" bash -c "[ $RC -eq 0 ]"
+MP="$PROFILE/hooks/lib/mcp-policy.json"; TB="$PROFILE/hooks/lib/trusted-bootstrap.json"
+printf 'CT_MCP_DENY="bad server"\nCT_TRUSTED_BOOTSTRAP_URLS="https://get.example.dev/install/"\n' > "$PROFILE/aka-claude-tools.config"
+SHELL=/bin/bash HOME="$SB" CT_ADDITIONS="command-guard mcp-guard" CT_NONINTERACTIVE=1 \
+  bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$SB/log2" 2>&1
+RC2=$?
+assert_ok "(i) re-install with CT_MCP_DENY=\"bad server\" exits non-zero" bash -c "[ $RC2 -ne 0 ]"
+assert_grep "(i) the failure names CT_MCP_DENY" 'CT_MCP_DENY in .* invalid server name' "$SB/log2"
+assert_ok "(i) mcp-policy.json still denies bad after the failed re-install" \
+  bash -c "jq -e '.deny == [\"bad\"]' '$MP' >/dev/null"
+# Same for the bootstrap key: an invalid URL leaves the previous rules in place.
+printf 'CT_MCP_DENY="bad"\nCT_TRUSTED_BOOTSTRAP_URLS="http://get.example.dev/install/"\n' > "$PROFILE/aka-claude-tools.config"
+SHELL=/bin/bash HOME="$SB" CT_ADDITIONS="command-guard mcp-guard" CT_NONINTERACTIVE=1 \
+  bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$SB/log3" 2>&1
+RC3=$?
+assert_ok "(i) re-install with an invalid bootstrap URL exits non-zero" bash -c "[ $RC3 -ne 0 ]"
+assert_ok "(i) trusted-bootstrap.json keeps its previous rules" \
+  bash -c "jq -e '.rules == [{\"host\":\"get.example.dev\",\"pathPrefix\":\"/install/\"}]' '$TB' >/dev/null"
+assert_ok "(i) mcp-policy.json still present after the bootstrap failure" \
+  bash -c "jq -e '.deny == [\"bad\"]' '$MP' >/dev/null"
+
 t_summary

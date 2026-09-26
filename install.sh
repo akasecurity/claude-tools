@@ -1069,12 +1069,16 @@ _mcp_server_name_to_json() {
 # mcp-guard reads at runtime. Owned by mcp-guard alone: compiled only when mcp-guard is
 # selected and removed when it is deselected; see the call site and cleanup below.
 # Modeled exactly on compile_org_sidecar: subshell-source, validate, atomic publish.
+# With a second arg `check`, validates only (same die()s), writes nothing and prints
+# nothing: apply_additions runs that preflight BEFORE any write, so an invalid value
+# aborts while the previously installed hooks/lib and its sidecar are still in place
+# (place_dir replaces hooks/lib wholesale, which would otherwise drop a working deny list).
 compile_mcp_policy_sidecar() {
-  local config_dir="$1"
+  local config_dir="$1" mode="${2:-}"
   local cfg="$config_dir/aka-claude-tools.config"
   local sidecar="$config_dir/hooks/lib/mcp-policy.json"
   [ -f "$cfg" ] || return 0
-  [ -d "$config_dir/hooks/lib" ] || return 0
+  [ "$mode" = "check" ] || [ -d "$config_dir/hooks/lib" ] || return 0
 
   # Source the config in a SUBSHELL (set +eu) exactly like compile_org_sidecar, and
   # smuggle BOTH values out over one command substitution using \x1f (a byte that
@@ -1086,7 +1090,7 @@ compile_mcp_policy_sidecar() {
   # failure, not just one where a value happened to already be captured — a config
   # that errors before CT_MCP_ALLOW/CT_MCP_DENY are ever reached must not compile a
   # silently-empty (fail-open) sidecar with no signal.
-  if [ "$_src_rc" -ne 0 ]; then
+  if [ "$_src_rc" -ne 0 ] && [ "$mode" != "check" ]; then
     if [ -z "$allow_raw" ] && [ -z "$deny_raw" ]; then
       warn "aka-claude-tools.config could not be sourced (exit $_src_rc) — CT_MCP_ALLOW/CT_MCP_DENY NOT compiled; the MCP policy tier is INACTIVE until you fix the config and re-run ./install.sh."
     else
@@ -1120,6 +1124,7 @@ compile_mcp_policy_sidecar() {
     for n in "${_names[@]}"; do _out+=("$(_mcp_server_name_to_json "CT_MCP_DENY" "$cfg" "$n")"); done
     deny_json="$(printf '%s\n' "${_out[@]}" | jq -R . | jq -s -c .)"
   fi
+  [ "$mode" = "check" ] && return 0
 
   # sourceHash: same portable sha256-over-raw-bytes as compile_org_sidecar, so
   # mcp-guard can re-derive it with bun's createHash over the identical bytes.
@@ -1182,12 +1187,13 @@ _bootstrap_url_to_rule() {
 # Modeled exactly on compile_org_sidecar: subshell-source, validate, atomic publish.
 # Owned by command-guard alone (unlike the shared egress libs above) — placed and
 # removed with command-guard specifically; see the call site and cleanup below.
+# `check` second arg: validate only, write nothing (see compile_mcp_policy_sidecar).
 compile_bootstrap_sidecar() {
-  local config_dir="$1"
+  local config_dir="$1" mode="${2:-}"
   local cfg="$config_dir/aka-claude-tools.config"
   local sidecar="$config_dir/hooks/lib/trusted-bootstrap.json"
   [ -f "$cfg" ] || return 0
-  [ -d "$config_dir/hooks/lib" ] || return 0
+  [ "$mode" = "check" ] || [ -d "$config_dir/hooks/lib" ] || return 0
 
   local raw="" _src_rc=0
   raw="$( set +eu; . "$cfg" >/dev/null 2>&1; _rc=$?; printf '%s' "${CT_TRUSTED_BOOTSTRAP_URLS:-}"; exit "$_rc" )" || _src_rc=$?
@@ -1195,7 +1201,7 @@ compile_bootstrap_sidecar() {
   # failure, not just one where a value happened to already be captured — a config
   # that errors before CT_TRUSTED_BOOTSTRAP_URLS is ever reached must not compile a
   # silently-empty (fail-open) sidecar with no signal.
-  if [ "$_src_rc" -ne 0 ]; then
+  if [ "$_src_rc" -ne 0 ] && [ "$mode" != "check" ]; then
     if [ -z "$raw" ]; then
       warn "aka-claude-tools.config could not be sourced (exit $_src_rc) — CT_TRUSTED_BOOTSTRAP_URLS NOT compiled; the trusted-bootstrap tier is INACTIVE until you fix the config and re-run ./install.sh."
     else
@@ -1216,6 +1222,7 @@ compile_bootstrap_sidecar() {
     done
     [ "${#_entries[@]}" -gt 0 ] && rules_json="$(printf '%s\n' "${_entries[@]}" | jq -s -c .)"
   fi
+  [ "$mode" = "check" ] && return 0
 
   local hash=""
   hash="$(sha256_file "$cfg" 2>/dev/null || true)"
@@ -1311,6 +1318,15 @@ apply_additions() {
     fi
     warn "⚠ leak-guard guards WEB egress only; command-guard (Bash egress) is not selected — your Bash egress is UNGUARDED. Add command-guard to guard outbound Bash commands."
   fi
+
+  # ── sidecar config preflight (runs BEFORE any write) ──
+  # Validate the MCP and trusted-bootstrap keys now, before place_dir replaces
+  # hooks/lib wholesale below. A typo then aborts the re-install with the previously
+  # compiled mcp-policy.json / trusted-bootstrap.json still in place (mcp-guard keeps
+  # enforcing the last-compiled deny list, with its stale-config warning), instead of
+  # dying after the lib was wiped and leaving no policy at all.
+  is_selected mcp-guard "$_sel_ids"     && compile_mcp_policy_sidecar "$config_dir" check
+  is_selected command-guard "$_sel_ids" && compile_bootstrap_sidecar "$config_dir" check
 
   # ── hard-dependency gate ──
   # Runs AFTER selection is known but BEFORE any dir/payload/rc write, so a missing
