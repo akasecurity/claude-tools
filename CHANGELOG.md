@@ -20,8 +20,8 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   built-in decompressors, so the caller chooses no binary.
 - **PATH-visible launcher shim**: alongside the shell alias, the installer now writes an
   executable shim at `<profile>/bin/<name>` and adds a guarded `PATH` export to the managed
-  rc block. Scripts, non-interactive shells, and the ai-tc `aka` CLI's git-style external
-  subcommand dispatch (`aka claude` → execs `claude-aka` from PATH) can launch the profile.
+  rc block, so scripts, non-interactive shells, and the ai-tc `aka` CLI's git-style external
+  subcommand dispatch can launch the profile.
   `--delete-alias` removes the shim with the block (marker-gated — a user file that merely
   shares the name is never deleted), and `uninstall.sh`'s profile removal covers it for free.
 - **PATH-conflict check**: `--alias` refuses (strict) or offers an alternate name
@@ -38,17 +38,20 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ### Changed
 - **Default launcher name is `claude-aka`** (was `aka`) for `~/.claude-aka` and the fallback
-  derivation. Bare `aka` and every `aka-*` name belong to the ai-tc AI Traffic Control CLI, so
-  `aka claude` dispatches to this launcher. Basename-derived names (`~/.claude-work` → `work`)
-  are unchanged. A profile whose recorded launcher is `aka-claude` is migrated by `--apply` or
+  derivation. Bare `aka` and every `aka-*` name belong to the ai-tc AI Traffic Control CLI.
+  ai-tc's `aka claude` still runs `aka-claude`, so it keeps working on a profile migrated from
+  `aka-claude` (through the forwarder below); a fresh `claude-aka` install is not reached by
+  `aka claude` until ai-tc's dispatcher targets `claude-aka`. Basename-derived names
+  (`~/.claude-work` → `work`) are unchanged. A profile whose recorded launcher is `aka-claude` is migrated by `--apply` or
   an installer re-run: it gets a `claude-aka` launcher, and `aka-claude` becomes a forwarder for
   one release that prints `aka-claude is deprecated; use claude-aka` to stderr and runs
   `claude-aka` with the same arguments. A user-owned `aka-claude` (no kit marker) is left alone.
   `--delete-alias claude-aka` and `uninstall.sh` remove the forwarder too; `--delete-alias
   aka-claude` removes only the forwarder.
 - The guards (`command-guard`, `leak-guard`, `rtk-safe`) now run on the vendored guard-core
-  library, with output unchanged from the previous standalone implementation (pinned by golden
-  tests against `tests/fixtures/guard-core-conformance.json`).
+  library, with output unchanged from the previous standalone implementation (pinned by the
+  golden output in `tests/golden/guard-output.json`; guard-core's own conformance fixtures run
+  as a separate suite).
 - The npm package now brings `bun` in as a dependency (pinned to 1.4.2), and the installer uses
   it when no system `bun` is on `PATH` and the bundled one actually runs. Under npm 12's default
   script policy its postinstall is blocked (allow it with `--allow-scripts=bun`) and the
