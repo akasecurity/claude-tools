@@ -96,7 +96,7 @@ don't specify one:
   rtk-safe (inert until stable `rtk` >= 0.49.0 is installed), responsive status line, shell-audit,
   the recommended nonessential-traffic toggles that don't touch Remote Control
   (error-reporting-off, feedback-off, feedback-survey-off), the opt-out `/wrap-up`
-  command, the opt-out secure-research and secure-deep-research workflows, the opt-out
+  command, the opt-out secure-deep-research workflow, the opt-out
   harness-pointer, the opt-out prompt-guard (needs `bun`; warns, never blocks, on
   prompt-injection phrasing, a credential paired with a send/upload instruction, and
   encoded shell blobs in what the user typed), the two opt-out traffic toggles telemetry-off (off by default
