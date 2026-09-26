@@ -37,9 +37,11 @@ Fifteen small pieces, nine on by default and six opt-in. Each stands alone. Take
 ## Quick start
 
 Two ways in, same result: a hardened profile launched by its own name (default
-`aka-claude` — a shell alias plus a PATH shim). Bare `aka` is deliberately left to the
-[AI Traffic Control](https://github.com/akasecurity) CLI, which shares the `aka`
-namespace: its git-style dispatcher makes `aka claude` launch this profile.
+`claude-aka` — a shell alias plus a PATH shim). Bare `aka` and every `aka-*` name are
+left to the [AI Traffic Control](https://github.com/akasecurity) CLI. The previous
+default, `aka-claude`, still works for one release: re-running the installer on such a
+profile adds `claude-aka` and turns `aka-claude` into a forwarder that prints a
+deprecation notice.
 
 **Hand it to Claude.** In a logged-in Claude Code session, say:
 
@@ -99,7 +101,7 @@ not a bare sandbox. Prefer a walkthrough? See the [safe-setup carousel](media/de
 ## See it actually block something
 
 A guard you haven't watched fire is one you're only assuming works. Launch the profile
-(`aka-claude`) and try:
+(`claude-aka`) and try:
 
 - ask it to read `~/.ssh/id_rsa` → it **refuses**
 - check the status bar → context and rate-limit gauges show
@@ -140,12 +142,11 @@ Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.
 ## Profiles
 
 A profile is its own `CLAUDE_CONFIG_DIR`: its own settings, hooks, and history, launched
-by name. Run several side by side: `claude` your everyday basics, `aka-claude` fully
+by name. Run several side by side: `claude` your everyday basics, `claude-aka` fully
 hardened, `work` work-only tools, `play` planning experiments. One Claude Code binary.
 The launcher is both a shell alias and an executable PATH shim at
 `<profile>/bin/<name>` (the managed rc block adds that bin dir to `PATH`), so scripts
-and other shells can exec it too — and with the AI Traffic Control CLI installed,
-`aka claude` runs it via git-style external-subcommand dispatch.
+and other shells can exec it too.
 
 - **Pick per profile.** Choose pieces from the menu, or set `CT_ADDITIONS` to the ids you want for a scripted run.
 - **Upgrade in place.** As the kit updates, re-run. It finds the kit-managed profiles and **layers the current additions in place**: retired rules reconciled, renamed hooks re-registered, your own settings left intact.

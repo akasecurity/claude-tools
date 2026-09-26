@@ -31,7 +31,7 @@ sandbox() { mktemp -d "$_SANDBOX_ROOT/sbx.XXXXXX"; }
 # install_path — a HERMETIC PATH for driving install.sh in tests that must be
 # immune to whatever launcher commands the operator's machine has on PATH. The
 # installer now refuses/renames a launcher name that already resolves to a PATH
-# command (e.g. a real ai-tc `aka` CLI, or an installed `aka-claude` shim from a
+# command (e.g. a real ai-tc `aka` CLI, or an installed `claude-aka` shim from a
 # genuine kit install), so a test asserting alias success/names under the
 # operator's full PATH would flake per-machine. This builds a one-off symlink
 # farm of exactly the tools the installer (and the test harness around it) needs

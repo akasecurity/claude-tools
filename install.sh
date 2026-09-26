@@ -8,12 +8,12 @@
 # is fully independent (own settings, hooks, agents, sessions). The launcher is a
 # shell alias that exports that variable before launching `claude`:
 #
-#     alias aka-claude='CLAUDE_CONFIG_DIR="$HOME/.claude-aka" claude'
+#     alias claude-aka='CLAUDE_CONFIG_DIR="$HOME/.claude-aka" claude'
 #
 # plus a PATH-visible executable shim at <config_dir>/bin/<name> (the managed rc
-# block also prepends that bin dir to PATH), so non-interactive shells, scripts,
-# and the ai-tc `aka` CLI's git-style subcommand dispatch (`aka claude` execs
-# `aka-claude` from PATH) can launch the profile too.
+# block also prepends that bin dir to PATH), so non-interactive shells and scripts
+# can launch the profile too. The pre-rename launcher name `aka-claude` survives
+# one release as a deprecated forwarder (see migrate_deprecated_launcher).
 #
 # Re-run any time. Idempotent: re-running for the same folder LAYERS in place —
 # it never duplicates, and unchecking an addition you previously installed
@@ -37,7 +37,7 @@
 #
 # Flags:
 #   --defaults         non-interactive; accept every default (config ~/.claude-aka,
-#                      launcher `aka-claude`, recommended additions, no copy of
+#                      launcher `claude-aka`, recommended additions, no copy of
 #                      existing config).
 #   --no-auth-inherit  do NOT seed the new profile's .claude.json from your existing
 #                      login (use when the profile is for a DIFFERENT account).
@@ -67,6 +67,8 @@
 #                      if supplied, refuses to delete if the alias resolves to a
 #                      DIFFERENT profile (prevents accidental cross-profile clobber).
 #                      Exits non-zero if no managed block for the alias is found.
+#                      Deleting the profile's current launcher also removes the
+#                      deprecated `aka-claude` forwarder to it, if one was migrated.
 #                      Requires CT_ALIAS; implies non-interactive.
 #   --version, -V      Print the kit version (from the VERSION file) and exit. Runs
 #                      before any dependency check, so it works on a bare checkout.
@@ -556,9 +558,8 @@ seed_auth() {
 
 # ── launcher shim (the PATH-visible twin of the alias) ────────────────────────
 # The alias only exists in interactive shells that source the rc. The shim at
-# <config_dir>/bin/<name> is a real executable, so scripts, other shells, and the
-# ai-tc `aka` CLI's git-style subcommand dispatch (`aka claude` execs `aka-claude`
-# from PATH) can launch the profile too. The managed rc block prepends that bin
+# <config_dir>/bin/<name> is a real executable, so scripts and other shells can
+# launch the profile too. The managed rc block prepends that bin
 # dir to PATH (guarded, so re-sourcing never duplicates the entry). The marker
 # comment below identifies kit-written shims so cleanup NEVER deletes a user file
 # that merely shares the name.
@@ -652,6 +653,90 @@ _write_launcher() {
   say "  ${C_DIM}Open a new shell (or: source $rc), then run:${C_RST}  ${C_BOLD}${name}${C_RST}"
 }
 
+# ── deprecated launcher name ─────────────────────────────────────────────────
+# `aka` and every `aka-*` name belong to ai-tc's CLI. Profiles installed before the
+# rename carry the launcher `aka-claude`; it is migrated to `claude-aka` and kept for
+# one release as a forwarder that prints a deprecation line to stderr and runs the
+# new launcher with the same arguments.
+DEFAULT_LAUNCHER="claude-aka"
+DEPRECATED_LAUNCHER="aka-claude"
+# Tag line inside the forwarder block. It carries the profile dir as
+# CLAUDE_CONFIG_DIR="…", which is what uninstall.sh's prune_blocks keys on, and what
+# --delete-alias resolves the profile from (the forwarder alias line has no dir).
+DEPRECATED_BLOCK_TAG='# deprecated launcher name; forwards to'
+
+deprecation_notice() { printf '%s is deprecated; use %s' "$1" "$2"; }
+
+# write_deprecated_shim <config_dir> <old> <new> — (re)write <config_dir>/bin/<old>
+# as a marked forwarder: one deprecation line to stderr, then exec the <new> shim
+# by absolute path with all arguments. Names passed assert_safe_alias_name and the
+# dir passed assert_safe_config_dir, so embedding them in quotes is safe.
+write_deprecated_shim() {
+  local config_dir="$1" old="$2" new="$3" shim
+  mkdir -p "$config_dir/bin" || die "Cannot create ${config_dir}/bin — your shell rc was NOT modified."
+  shim="$config_dir/bin/$old"
+  {
+    printf '#!/usr/bin/env bash\n%s\n' "$AKA_SHIM_MARKER"
+    printf "printf '%%s\\\\n' '%s' >&2\n" "$(deprecation_notice "$old" "$new")"
+    printf 'exec "%s/bin/%s" "$@"\n' "$config_dir" "$new"
+  } > "$shim" || die "Cannot write the launcher shim at ${shim} — your shell rc was NOT modified."
+  chmod +x "$shim" || die "Cannot make ${shim} executable — your shell rc was NOT modified."
+}
+
+# deprecated_block_content <config_dir> <old> <new> — the forwarder's managed rc block
+# body. No PATH export: the <new> launcher's block carries it.
+deprecated_block_content() {
+  local config_dir="$1" old="$2" new="$3" q="'"
+  printf '%s\n' "alias ${old}=${q}printf \"%s\\n\" \"$(deprecation_notice "$old" "$new")\" >&2; ${new}${q}"
+  printf '%s %s (CLAUDE_CONFIG_DIR="%s")' "$DEPRECATED_BLOCK_TAG" "$new" "$config_dir"
+}
+
+# migrate_deprecated_launcher <config_dir> <apply|rerun> [prior_alias]
+#   apply — the --apply path: if the recorded launcher is `aka-claude`, write the
+#           `claude-aka` launcher (through setup_alias, so every collision gate
+#           applies), then turn `aka-claude` into the forwarder.
+#   rerun — the interactive/--defaults path, called after setup_alias: if the launcher
+#           recorded BEFORE this run was `aka-claude` and this run recorded a new one,
+#           turn `aka-claude` into a forwarder to it.
+# Idempotent: once migrated the recorded launcher is no longer `aka-claude`, so a
+# re-run does nothing. A user-owned `aka-claude` (a shim without the kit marker, or
+# an alias defined outside our block) is never overwritten: warn and skip.
+migrate_deprecated_launcher() {
+  local config_dir="$1" mode="$2" old new rc prior
+  case "$mode" in
+    apply) old="$(meta_get "$config_dir" alias)" ;;
+    *)     old="${3:-}" ;;
+  esac
+  [ "$old" = "$DEPRECATED_LAUNCHER" ] || return 0
+  rc="$(detect_shell_rc)"
+  new="$(meta_get "$config_dir" alias)"
+  if [ "$mode" = "apply" ]; then
+    new="$DEFAULT_LAUNCHER"
+    if ! setup_alias "$config_dir" "$new" strict; then
+      warn "Could not write the '${new}' launcher, so '${old}' was left as it is."
+      return 0
+    fi
+    meta_set "$config_dir" alias "$new"
+  fi
+  # rerun with the old name kept, or the alias skipped: nothing to forward to.
+  [ -n "$new" ] && [ "$new" != "$old" ] || return 0
+
+  local shim="$config_dir/bin/$old"
+  if [ -e "$shim" ] && ! grep -qF "$AKA_SHIM_MARKER" "$shim" 2>/dev/null; then
+    warn "${shim} is not a kit launcher shim; left it in place and did not add the '${old}' forwarder."
+    return 0
+  fi
+  prior="$(alias_target_elsewhere "$old" "$rc")"
+  if [ -n "$prior" ]; then
+    warn "'${old}' is defined elsewhere in your shell config; left it in place and did not add the '${old}' forwarder."
+    return 0
+  fi
+  write_deprecated_shim "$config_dir" "$old" "$new"
+  write_managed_block "$rc" "$old" "$(deprecated_block_content "$config_dir" "$old" "$new")"
+  meta_set "$config_dir" deprecated_alias "$old"
+  warn "$(deprecation_notice "$old" "$new"). '${old}' now forwards to '${new}' and will be removed in a later release."
+}
+
 # _launcher_alternate_prompt <rc> <config_dir> <taken_name> — interactive-policy
 # fallback when <taken_name> is unavailable (rc-alias collision or PATH command):
 # offer an alternate (default <name>2), re-gate it, and refuse to claim an
@@ -715,7 +800,7 @@ setup_alias() {
   if clash="$(launcher_path_conflict "$config_dir" "$alias_name")"; then
     warn "'${alias_name}' is already a command on your PATH (${clash})."
     if [ "$alias_name" = "aka" ]; then
-      say "  ${C_DIM}'aka' is the AI Traffic Control CLI. Keep the default 'aka-claude' launcher name instead — once ai-tc is installed, 'aka claude' dispatches to it and launches this profile.${C_RST}"
+      say "  ${C_DIM}'aka' and every 'aka-*' name belong to the AI Traffic Control CLI. Keep the default 'claude-aka' launcher name instead.${C_RST}"
     fi
     if [ "$policy" = "strict" ]; then
       say "  ${C_DIM}Pick another launcher name and re-run, or launch with:${C_RST}  CLAUDE_CONFIG_DIR=\"${config_dir}\" claude"
@@ -825,13 +910,14 @@ setup_one_config() {
     base="$(basename "$config_dir")"
     alias_default="${base#.claude-}"; [ "$alias_default" = "$base" ] && alias_default="aka"
     [ -z "$alias_default" ] && alias_default="aka"
-    # Bare `aka` is reserved for the ai-tc AI Traffic Control CLI: its git-style
-    # dispatcher runs `aka claude` by exec'ing `aka-claude` from PATH — exactly
-    # this launcher's shim. So ~/.claude-aka (and the fallback) default to
-    # `aka-claude`, never plain `aka`.
-    [ "$alias_default" = "aka" ] && alias_default="aka-claude"
+    # Bare `aka` and every `aka-*` name belong to ai-tc's CLI. This kit's launcher for
+    # ~/.claude-aka (and the fallback) is `claude-aka`.
+    [ "$alias_default" = "aka" ] && alias_default="$DEFAULT_LAUNCHER"
     prompt alias_name "Shell alias to launch it:" "$alias_default"
   fi
+  # The launcher this profile had before this run, for migrate_deprecated_launcher.
+  local prior_alias=""
+  [ "$is_default" != "1" ] && prior_alias="$(meta_get "$config_dir" alias)"
 
   # 3. layer the additions (the deterministic engine).
   apply_additions "$config_dir"
@@ -850,6 +936,7 @@ setup_one_config() {
   else
     say ""
     setup_alias "$config_dir" "$alias_name" interactive
+    migrate_deprecated_launcher "$config_dir" rerun "$prior_alias"
   fi
 }
 
@@ -940,10 +1027,20 @@ compile_org_sidecar() {
 meta_set() {
   local dir="$1" key="$2" val="$3"
   local f="$dir/.aka-claude-tools-meta" tmp
+  # Already recorded with this value: leave the file byte-identical.
+  [ -f "$f" ] && [ "$(grep -E "^${key}=" "$f" 2>/dev/null | tail -1)" = "${key}=${val}" ] && return 0
   tmp="$(mktemp "${TMPDIR:-/tmp}/aka-meta.XXXXXX" 2>/dev/null)" || return 0
   if [ -f "$f" ]; then grep -vE "^${key}=" "$f" 2>/dev/null > "$tmp" || true; fi
   printf '%s=%s\n' "$key" "$val" >> "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 0; }
   mv "$tmp" "$f" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 0; }
+}
+
+# meta_get <config_dir> <key> — print the recorded value for <key> from
+# <config_dir>/.aka-claude-tools-meta (last line wins), or nothing. set -e safe.
+meta_get() {
+  local f="$1/.aka-claude-tools-meta"
+  [ -f "$f" ] || return 0
+  { grep -E "^${2}=" "$f" 2>/dev/null || true; } | tail -1 | cut -d= -f2-
 }
 
 # ── deterministic engine: layer additions onto a config dir ──────────────────
@@ -1534,6 +1631,7 @@ apply_entry() {
   mkdir -p "$config_dir"
   apply_additions "$config_dir"
   ok "Applied additions to ${config_dir/#$HOME/~}"
+  migrate_deprecated_launcher "$config_dir" apply
 }
 
 # ── --alias entry: create/check the launcher alias, the sole sanctioned rc write ─
@@ -1558,6 +1656,46 @@ alias_entry() {
 # refusing to delete if it points somewhere else (prevents cross-profile clobber).
 # Exits non-zero (with a message) if no managed block is found or a safety check
 # fails; exits 0 on success.
+# _block_body <rc> <name> — the lines inside our managed block for <name>, matched
+# by exact marker equality (never the <name>[0-9]* family).
+_block_body() {
+  local begin="# >>> aka-claude-tools managed: ${2} >>>" end="# <<< aka-claude-tools managed: ${2} <<<"
+  [ -f "$1" ] || return 0
+  awk -v b="$begin" -v e="$end" '$0==b{in_b=1;next} $0==e{in_b=0;next} in_b{print}' "$1"
+}
+
+# _remove_block_exact <rc> <name> — delete exactly <name>'s managed block (string
+# equality on the markers, so `aka` never removes `aka2`). EOF-safe like
+# remove_managed_block: a begin with no matching end is flushed back, not dropped.
+_remove_block_exact() {
+  local rc="$1" begin="# >>> aka-claude-tools managed: ${2} >>>" end="# <<< aka-claude-tools managed: ${2} <<<" tmp
+  [ -f "$rc" ] && grep -qF "$begin" "$rc" || return 1
+  tmp="$(mktemp)"
+  awk -v b="$begin" -v e="$end" '
+    $0==b { if (skip) for (i=0;i<n;i++) print buf[i]; skip=1; n=0; next }
+    skip && $0==e { skip=0; n=0; next }
+    skip { buf[n++]=$0; next }
+    { print }
+    END { if (skip) for (i=0;i<n;i++) print buf[i] }
+  ' "$rc" > "$tmp"
+  mv "$tmp" "$rc"
+}
+
+# _remove_marked_shim <dir> <name> — remove <dir>/bin/<name> ONLY if it carries the
+# kit's shim marker (never a user file that shares the name), then the bin/ dir if
+# it empties. An unreadable file is reported rather than skipped silently.
+_remove_marked_shim() {
+  local dir="$1" name="$2"
+  [ -n "$dir" ] && [ -f "$dir/bin/$name" ] || return 0
+  if [ ! -r "$dir/bin/$name" ]; then
+    warn "Couldn't read ${dir}/bin/${name} to check whether it's ours — left in place. Remove it by hand if it's a stale launcher shim."
+  elif grep -qF "$AKA_SHIM_MARKER" "$dir/bin/$name"; then
+    rm -f "$dir/bin/$name"
+    rmdir "$dir/bin" 2>/dev/null || true
+    ok "Removed launcher shim ${dir}/bin/${name}"
+  fi
+}
+
 delete_alias_entry() {
   [ -n "${CT_ALIAS:-}" ] || die "--delete-alias requires CT_ALIAS (the alias name to remove)."
   assert_safe_alias_name "$CT_ALIAS"
@@ -1565,22 +1703,23 @@ delete_alias_entry() {
   local rc; rc="$(detect_shell_rc)"
 
   # Exact marker strings for this alias — used for both inspection and deletion.
-  # Using exact string equality ($0==b) instead of remove_managed_block's family
-  # pattern (id[0-9]*) so that --delete-alias aka never accidentally removes aka2,
-  # which may belong to a different profile created via collision-renaming.
-  local begin end
+  # Using exact string equality instead of remove_managed_block's family pattern
+  # (id[0-9]*) so that --delete-alias aka never accidentally removes aka2, which may
+  # belong to a different profile created via collision-renaming.
+  local begin
   begin="# >>> aka-claude-tools managed: ${CT_ALIAS} >>>"
-  end="# <<< aka-claude-tools managed: ${CT_ALIAS} <<<"
 
-  # Extract the alias line from inside our managed block (awk range pattern is safe:
-  # begin/end are literal strings from marker constants, not user-controlled). The
-  # resolved target drives BOTH the profile guard below and the shim cleanup after
-  # deletion (the shim lives at <target>/bin/<alias>).
-  local mb_line mb_target="" config_dir=""
-  if [ -f "$rc" ]; then
-    mb_line="$(awk -v b="$begin" -v e="$end" '$0==b{in_b=1;next} $0==e{in_b=0;next} in_b{print}' "$rc" \
-               | grep -m1 "^alias[[:space:]]*${CT_ALIAS}=" || true)"
-    [ -n "$mb_line" ] && mb_target="$(_alias_resolve_target "$mb_line")"
+  # Extract the alias line from inside our managed block. The resolved target
+  # drives BOTH the profile guard below and the shim cleanup after deletion (the
+  # shim lives at <target>/bin/<alias>). A deprecated forwarder's alias line has no
+  # CLAUDE_CONFIG_DIR, so its profile comes from the block's tag line instead.
+  local body mb_line mb_target="" config_dir=""
+  body="$(_block_body "$rc" "$CT_ALIAS")"
+  mb_line="$(printf '%s\n' "$body" | grep -m1 "^alias[[:space:]]*${CT_ALIAS}=" || true)"
+  [ -n "$mb_line" ] && mb_target="$(_alias_resolve_target "$mb_line")"
+  if [ "$mb_target" = "OTHER" ]; then
+    local tag; tag="$(printf '%s\n' "$body" | grep -m1 -F "$DEPRECATED_BLOCK_TAG" || true)"
+    [ -n "$tag" ] && mb_target="$(_alias_resolve_target "$tag")"
   fi
 
   # Optional profile guard: if CT_CONFIG_DIR is set, refuse if the managed block's
@@ -1602,37 +1741,35 @@ delete_alias_entry() {
     fi
   fi
 
-  # Delete exactly this alias's block using string equality on the markers.
-  # Mirrors remove_managed_block's EOF-flush safety: a begin with no matching end
-  # is flushed back rather than silently dropped.
-  if [ -f "$rc" ] && grep -qF "$begin" "$rc"; then
-    local tmp; tmp="$(mktemp)"
-    awk -v b="$begin" -v e="$end" '
-      $0==b { if (skip) for (i=0;i<n;i++) print buf[i]; skip=1; n=0; next }
-      skip && $0==e { skip=0; n=0; next }
-      skip { buf[n++]=$0; next }
-      { print }
-      END { if (skip) for (i=0;i<n;i++) print buf[i] }
-    ' "$rc" > "$tmp"
-    mv "$tmp" "$rc"
-    [ -n "${CT_CONFIG_DIR:-}" ] && meta_set "$config_dir" alias "" || true
+  # The profile the shim and meta live in: CT_CONFIG_DIR when given, else the
+  # deleted block's own resolved target.
+  local prof_dir="$config_dir"
+  [ -z "$prof_dir" ] && [ -n "$mb_target" ] && [ "$mb_target" != "OTHER" ] && prof_dir="$mb_target"
+  local cur_alias="" dep_alias=""
+  if [ -n "$prof_dir" ]; then
+    cur_alias="$(meta_get "$prof_dir" alias)"
+    dep_alias="$(meta_get "$prof_dir" deprecated_alias)"
+  fi
+
+  if _remove_block_exact "$rc" "$CT_ALIAS"; then
     ok "Removed alias '${CT_ALIAS}' from ${rc}"
-    # Also remove the launcher's PATH shim — but ONLY a file carrying the kit's
-    # shim marker (never an arbitrary user file that shares the name). The shim
-    # dir comes from CT_CONFIG_DIR when given, else from the deleted block's own
-    # resolved target.
-    local shim_dir="$config_dir"
-    [ -z "$shim_dir" ] && [ -n "$mb_target" ] && [ "$mb_target" != "OTHER" ] && shim_dir="$mb_target"
-    # An unreadable file is NOT the same as a non-kit file: say so rather than
-    # leaving the shim behind under a message that reads like a full cleanup.
-    if [ -n "$shim_dir" ] && [ -f "$shim_dir/bin/$CT_ALIAS" ]; then
-      if [ ! -r "$shim_dir/bin/$CT_ALIAS" ]; then
-        warn "Couldn't read ${shim_dir}/bin/${CT_ALIAS} to check whether it's ours — left in place. Remove it by hand if it's a stale launcher shim."
-      elif grep -qF "$AKA_SHIM_MARKER" "$shim_dir/bin/$CT_ALIAS"; then
-        rm -f "$shim_dir/bin/$CT_ALIAS"
-        rmdir "$shim_dir/bin" 2>/dev/null || true
-        ok "Removed launcher shim ${shim_dir}/bin/${CT_ALIAS}"
+    if [ -n "$prof_dir" ]; then
+      if [ -n "$dep_alias" ] && [ "$CT_ALIAS" = "$dep_alias" ]; then
+        # Deleting the deprecated forwarder only: the current launcher stays.
+        meta_set "$prof_dir" deprecated_alias ""
+      elif [ -n "${CT_CONFIG_DIR:-}" ]; then
+        meta_set "$prof_dir" alias ""
       fi
+    fi
+    _remove_marked_shim "$prof_dir" "$CT_ALIAS"
+    # Deleting the current launcher also removes the deprecated forwarder to it, which
+    # would otherwise forward to a launcher that no longer exists.
+    if [ -n "$dep_alias" ] && [ "$CT_ALIAS" != "$dep_alias" ] && [ "$CT_ALIAS" = "$cur_alias" ]; then
+      if _block_body "$rc" "$dep_alias" | grep -qF "$DEPRECATED_BLOCK_TAG"; then
+        _remove_block_exact "$rc" "$dep_alias" && ok "Removed deprecated alias '${dep_alias}' from ${rc}"
+      fi
+      _remove_marked_shim "$prof_dir" "$dep_alias"
+      meta_set "$prof_dir" deprecated_alias ""
     fi
     say "  ${C_DIM}Open a new shell (or: source ${rc}) for the change to take effect.${C_RST}"
   else

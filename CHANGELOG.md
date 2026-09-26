@@ -34,6 +34,14 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   derivation. Bare `aka` is reserved for the ai-tc AI Traffic Control CLI so `aka claude` can
   dispatch to this launcher. Basename-derived names (`~/.claude-work` → `work`) are unchanged.
   Existing profiles keep whatever alias they recorded; re-running does not rename them.
+- **Default launcher name is `claude-aka`** (replaces `aka-claude`). Bare `aka` and every
+  `aka-*` name belong to the ai-tc CLI. A profile whose recorded launcher is `aka-claude` is
+  migrated by `--apply` or an installer re-run: it gets a `claude-aka` launcher, and
+  `aka-claude` becomes a forwarder for one release that prints
+  `aka-claude is deprecated; use claude-aka` to stderr and runs `claude-aka` with the same
+  arguments. A user-owned `aka-claude` (no kit marker) is left alone. `--delete-alias
+  claude-aka` and `uninstall.sh` remove the forwarder too; `--delete-alias aka-claude`
+  removes only the forwarder.
 
 ### Fixed
 - `rtk-safe` restores standalone `grep`/`rg` rewriting on stable RTK >= 0.49.0, with

@@ -79,7 +79,7 @@ assert_grep "jq absent: gives an install instruction" \
 [ -e "$PROFILE1" ] && fail "jq absent: profile dir NOT created" "it exists at $PROFILE1" \
                     || pass "jq absent: profile dir NOT created"
 assert_nlit "jq absent: no alias block written to rc" \
-  ">>> aka-claude-tools managed: aka-claude" "$RC1"
+  ">>> aka-claude-tools managed: claude-aka" "$RC1"
 
 # ════════════════════════════════════════════════════════════════════════════
 # CASE 2 — bun ABSENT (jq present). bun is a HARD dependency of every .ts hook
@@ -122,7 +122,7 @@ assert_grep "bun absent (selected): gives an install instruction" \
 [ -e "$PROFILE2" ] && fail "bun absent (selected): profile dir NOT created" "it exists at $PROFILE2" \
                    || pass "bun absent (selected): profile dir NOT created"
 assert_nlit "bun absent (selected): no alias block written to rc" \
-  ">>> aka-claude-tools managed: aka-claude" "$RC2"
+  ">>> aka-claude-tools managed: claude-aka" "$RC2"
 
 # ── 2b: ONLY non-bun additions + bun absent → success (bun not needed) ────────
 # No .ts hook selected (no command-guard / leak-guard / statusline / rtk-safe), so the
@@ -157,7 +157,7 @@ assert_ok   "bun absent (non-bun sel): kit denies still merged (secure-settings)
 assert_file "bun absent (non-bun sel): wrap-up.md still placed"   "$PROFILE2B/commands/wrap-up.md"
 assert_file "bun absent (non-bun sel): shell-audit skill placed"  "$PROFILE2B/skills/shell-audit"
 assert_lit  "bun absent (non-bun sel): managed alias block written to rc" \
-  ">>> aka-claude-tools managed: aka-claude" "$RC2B"
+  ">>> aka-claude-tools managed: claude-aka" "$RC2B"
 # no maintainer-only $comment leak in the merged settings.
 assert_ok   "bun absent (non-bun sel): no \$comment keys in deployed settings" \
   bash -c "jq -e '[.. | objects | keys[]] | index(\"\$comment\") | not' '$S2B' >/dev/null"
@@ -186,7 +186,7 @@ assert_grep "bun absent (statusline): reports bun is required (not a silent skip
 [ -e "$PROFILE2C" ] && fail "bun absent (statusline): profile dir NOT created" "it exists at $PROFILE2C" \
                     || pass "bun absent (statusline): profile dir NOT created"
 assert_nlit "bun absent (statusline): no alias block written to rc" \
-  ">>> aka-claude-tools managed: aka-claude" "$RC2C"
+  ">>> aka-claude-tools managed: claude-aka" "$RC2C"
 
 # ── 2d: leak-guard selected + bun absent → abort (leak-guard is a .ts hook now, so it
 #        requires bun like command-guard; command-guard NOT selected here, proving the
@@ -210,6 +210,6 @@ assert_grep "bun absent (leak-guard): reports bun is required (not a silent skip
 [ -e "$PROFILE2D" ] && fail "bun absent (leak-guard): profile dir NOT created" "it exists at $PROFILE2D" \
                     || pass "bun absent (leak-guard): profile dir NOT created"
 assert_nlit "bun absent (leak-guard): no alias block written to rc" \
-  ">>> aka-claude-tools managed: aka-claude" "$RC2D"
+  ">>> aka-claude-tools managed: claude-aka" "$RC2D"
 
 t_summary

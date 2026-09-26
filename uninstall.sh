@@ -88,6 +88,9 @@ discover_profiles() {
 # prune_blocks FILE — remove every managed block whose body points
 # CLAUDE_CONFIG_DIR at $CFG. Echoes the number removed; rewrites FILE only if it
 # removed at least one. Name-independent: keys off the marker + the embedded dir.
+# That covers a deprecated launcher forwarder (meta deprecated_alias) too: its alias
+# line has no dir, but its block carries a tag line with CLAUDE_CONFIG_DIR="<profile>",
+# and its shim lives in <profile>/bin, which the rm -rf below removes.
 prune_blocks() {
   local file="$1"
   [ -f "$file" ] || { echo 0; return 0; }
