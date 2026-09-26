@@ -430,7 +430,17 @@ prune_addition_from_settings() {
   # install; prune_statusline only drops the statusLine command, so remove that pinned
   # preference too (it is the only thing the kit writes under .preferences).
   [ "$id" = "statusline" ] && s="$(printf '%s' "$s" | jq 'if (.preferences|type)=="object" then (del(.preferences.location) | (if (.preferences=={}) then del(.preferences) else . end)) else . end')"
-  [ "$id" = "sandbox" ] && { s="$(printf '%s' "$s" | prune_sandbox)"; meta_set "$config_dir" sandbox_installed 0; }
+  # Ownership gate: this prune runs for every UNSELECTED id on every apply, so it only
+  # touches sandbox.enabled when the kit actually set it — the sandbox_installed meta
+  # flag, or a stash left by a select. A value the user set on a profile where the
+  # addition was never selected (or set by hand after a deselect) is theirs and stays.
+  if [ "$id" = "sandbox" ]; then
+    if [ "$(meta_get "$config_dir" sandbox_installed)" = "1" ] \
+       || printf '%s' "$s" | jq -e 'has("_aka_prior_sandbox_enabled")' >/dev/null 2>&1; then
+      s="$(printf '%s' "$s" | prune_sandbox)"
+      meta_set "$config_dir" sandbox_installed 0
+    fi
+  fi
   [ -n "$setf" ] && [ -f "$CONFIG_SRC/$setf" ] && s="$(printf '%s' "$s" | prune_perms_env "$CONFIG_SRC/$setf")"
   printf '%s' "$s"
 }

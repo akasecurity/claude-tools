@@ -236,4 +236,66 @@ assert_install_ok "idempotent: deselect after repeat-select exits 0" "$SB4/desel
 assert_nlit "idempotent: deselect after repeat-select removes sandbox.enabled entirely" \
   '"sandbox"' "$S4"
 
+# ── 8. never-selected: a user's OWN sandbox.enabled survives every apply ─────────
+#      The deselect loop runs prune for every UNSELECTED id on every apply, so the
+#      prune must be gated on the kit having set the value (the sandbox_installed meta
+#      flag or the stash) — otherwise an apply that merely adds other additions would
+#      delete a value the user set by hand and the kit never touched.
+for _uv in true false; do
+  SB8="$(sandbox)"; PROFILE8="$SB8/profile"; mkdir -p "$PROFILE8"
+  printf '{"sandbox":{"enabled":%s}}\n' "$_uv" > "$PROFILE8/settings.json"
+  install_into "$SB8" "$PROFILE8" "secure-settings telemetry-off" >"$SB8/apply.log" 2>&1
+  assert_install_ok "never-selected ($_uv): apply with other additions exits 0" "$SB8/apply.log" "$?"
+  if jq -e --argjson v "$_uv" '.sandbox.enabled == $v' "$PROFILE8/settings.json" >/dev/null 2>&1; then
+    pass "never-selected ($_uv): the user's sandbox.enabled=$_uv is kept"
+  else
+    fail "never-selected ($_uv): the user's sandbox.enabled=$_uv is kept" "got: $(jq -c '.sandbox // "MISSING"' "$PROFILE8/settings.json" 2>/dev/null)"
+  fi
+  assert_nlit "never-selected ($_uv): no 'Uninstalled sandbox' line" "Uninstalled 'sandbox'" "$SB8/apply.log"
+  # A second apply (still never selected) keeps it too.
+  install_into "$SB8" "$PROFILE8" "secure-settings" >"$SB8/apply2.log" 2>&1
+  assert_install_ok "never-selected ($_uv): second apply exits 0" "$SB8/apply2.log" "$?"
+  jq -e --argjson v "$_uv" '.sandbox.enabled == $v' "$PROFILE8/settings.json" >/dev/null 2>&1 \
+    && pass "never-selected ($_uv): still kept after a second apply" \
+    || fail "never-selected ($_uv): still kept after a second apply" "got: $(jq -c '.sandbox // "MISSING"' "$PROFILE8/settings.json" 2>/dev/null)"
+done
+
+# ── 9. select → deselect removes the kit value and clears the meta flag; a later
+#      hand-set value is then the user's own and survives further applies ─────────
+SB9="$(sandbox)"; PROFILE9="$SB9/profile"; S9="$PROFILE9/settings.json"
+install_into "$SB9" "$PROFILE9" "secure-settings sandbox" >"$SB9/select.log" 2>&1
+assert_install_ok "select-deselect: select exits 0" "$SB9/select.log" "$?"
+install_into "$SB9" "$PROFILE9" "secure-settings" >"$SB9/deselect.log" 2>&1
+assert_install_ok "select-deselect: deselect exits 0" "$SB9/deselect.log" "$?"
+assert_nlit "select-deselect: the kit's sandbox.enabled is removed" '"sandbox"' "$S9"
+assert_lit "select-deselect: meta flag cleared" "sandbox_installed=0" "$PROFILE9/.aka-claude-tools-meta"
+tmp9="$(mktemp)"; jq '.sandbox.enabled = true' "$S9" > "$tmp9" && mv "$tmp9" "$S9"
+install_into "$SB9" "$PROFILE9" "secure-settings" >"$SB9/after.log" 2>&1
+assert_install_ok "select-deselect: later apply exits 0" "$SB9/after.log" "$?"
+jq -e '.sandbox.enabled == true' "$S9" >/dev/null 2>&1 \
+  && pass "select-deselect: a value hand-set after deselect is the user's own and survives" \
+  || fail "select-deselect: a value hand-set after deselect survives" "got: $(jq -c '.sandbox // "MISSING"' "$S9" 2>/dev/null)"
+
+# ── 10. select → deselect → reselect still stashes the user's prior value ─────────
+SB10="$(sandbox)"; PROFILE10="$SB10/profile"; S10="$PROFILE10/settings.json"; mkdir -p "$PROFILE10"
+printf '{"sandbox":{"enabled":false}}\n' > "$S10"
+install_into "$SB10" "$PROFILE10" "sandbox" >"$SB10/s1.log" 2>&1
+assert_install_ok "reselect: first select exits 0" "$SB10/s1.log" "$?"
+install_into "$SB10" "$PROFILE10" "" >"$SB10/d1.log" 2>&1
+assert_install_ok "reselect: deselect exits 0" "$SB10/d1.log" "$?"
+jq -e '.sandbox.enabled == false' "$S10" >/dev/null 2>&1 \
+  && pass "reselect: deselect restored the user's false" \
+  || fail "reselect: deselect restored the user's false" "got: $(jq -c '.' "$S10" 2>/dev/null)"
+install_into "$SB10" "$PROFILE10" "sandbox" >"$SB10/s2.log" 2>&1
+assert_install_ok "reselect: reselect exits 0" "$SB10/s2.log" "$?"
+jq -e '.sandbox.enabled == true and ._aka_prior_sandbox_enabled == false' "$S10" >/dev/null 2>&1 \
+  && pass "reselect: true while selected, the user's false stashed again" \
+  || fail "reselect: true while selected, the user's false stashed again" "got: $(jq -c '.' "$S10" 2>/dev/null)"
+assert_lit "reselect: meta flag set again" "sandbox_installed=1" "$PROFILE10/.aka-claude-tools-meta"
+install_into "$SB10" "$PROFILE10" "" >"$SB10/d2.log" 2>&1
+assert_install_ok "reselect: second deselect exits 0" "$SB10/d2.log" "$?"
+jq -e '.sandbox.enabled == false and (has("_aka_prior_sandbox_enabled")|not)' "$S10" >/dev/null 2>&1 \
+  && pass "reselect: second deselect restores false and drops the stash" \
+  || fail "reselect: second deselect restores false and drops the stash" "got: $(jq -c '.' "$S10" 2>/dev/null)"
+
 t_summary
