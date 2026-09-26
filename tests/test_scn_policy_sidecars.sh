@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# test_scn_sidecars_2b.sh — install-time compilation + STRICT validation of the two
-# 2b surface sidecars: hooks/lib/mcp-policy.json (CT_MCP_ALLOW / CT_MCP_DENY) and
+# test_scn_policy_sidecars.sh — install-time compilation + STRICT validation of the two
+# policy sidecars: hooks/lib/mcp-policy.json (CT_MCP_ALLOW / CT_MCP_DENY) and
 # hooks/lib/trusted-bootstrap.json (CT_TRUSTED_BOOTSTRAP_URLS). Modeled on
 # test_sidecar_compile.sh (org-egress): the installer compiles the user's shell
 # config into inert JSON no hook ever sources; invalid input dies naming the key.
@@ -10,7 +10,7 @@
 # owned by command-guard alone. Each is placed only when its owner is selected and
 # removed when its owner is deselected, independently of the shared egress libs.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-echo "test_scn_sidecars_2b:"
+echo "test_scn_policy_sidecars:"
 
 if ! command -v bun >/dev/null 2>&1; then
   echo "  note: bun absent — command-guard is bun-gated; sidecar tests skipped."
