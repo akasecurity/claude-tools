@@ -95,14 +95,6 @@
       "workflow": "workflows/secure-deep-research.js"
     },
     {
-      "id": "secure-research",
-      "name": "secure-research",
-      "prompt": "secure-research (everyday privacy-aware multi-source research)?",
-      "recommended": false,
-      "description": "Everyday multi-source research workflow (the Claude Research shape): parallel researcher subagents gather cited findings, one bounded gap-check wave, then a grounded synthesis. No adversarial verify tournament, so cheaper than secure-deep-research. Reach for that when claims need per-claim verification. Same privacy handling: sensitive topics are conservatively classified, query-redacted, GATED before any external query, and routed through a self-hosted SearXNG MCP server (mcp__searxng__*). Normal topics use WebSearch/WebFetch. Model-tiered: Scope+Synthesize inherit the session model, researchers run on Haiku, gap-check on Sonnet. Auto-registers as the /secure-research skill. NOTE: the sensitive-topic path needs a self-hosted SearXNG MCP server. Without it, only the normal (WebSearch) path works.",
-      "workflow": "workflows/secure-research.js"
-    },
-    {
       "id": "harness-pointer",
       "name": "harness-pointer",
       "prompt": "harness-pointer (opt-in, ships disabled+empty)?",

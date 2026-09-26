@@ -1610,12 +1610,6 @@ apply_additions() {
     place_file "$CONFIG_SRC/workflows/secure-deep-research.js" "$config_dir/workflows"
     ok "Placed secure-deep-research workflow ${C_DIM}(invoke: /secure-deep-research)${C_RST}"
   fi
-  if is_selected secure-research "$_sel_ids"; then
-    # Same mechanism: a .js in <config>/workflows/ auto-registers as the named
-    # workflow and the /secure-research skill.
-    place_file "$CONFIG_SRC/workflows/secure-research.js" "$config_dir/workflows"
-    ok "Placed secure-research workflow ${C_DIM}(invoke: /secure-research)${C_RST}"
-  fi
 
   # 4c. opt-in config template if any config-driven hook was selected. command-guard
   # is in the trigger now: it reads CT_EGRESS_PATTERNS (via the compiled sidecar

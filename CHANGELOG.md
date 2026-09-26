@@ -8,6 +8,15 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+### Removed
+- **`secure-research`** moved to `akasecurity/preflight-skills`, where it runs in every harness that
+  preflight supports. It can now spread its researchers across the `claude`, `codex`, `agy` and
+  `grok` CLIs and a self-hosted SearXNG. In Claude Code it is `/preflight:secure-research`. The
+  installer no longer places `workflows/secure-research.js`. An existing copy in a profile's
+  `workflows/` keeps working but gets no updates, so delete it once preflight is installed.
+  `secure-deep-research` stays here. **Breaking for scripted installs:** `CT_ADDITIONS` rejects
+  unknown ids, so drop `secure-research` from any saved `CT_ADDITIONS` list.
+
 ### Added
 - **`mcp-guard`**: a new PreToolUse guard on every MCP tool call (`mcp__*`), on by default.
   Applies an MCP server allow/deny policy first (`CT_MCP_DENY` blocks named servers; a
