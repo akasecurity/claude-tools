@@ -220,13 +220,13 @@
   {
     "id": "mcp-cred",
     "exit": 2,
-    "stderr": "mcp-guard: warn — trufflehog not installed; secret detection degraded to the regex tiers (org markers and shared key shapes).\nmcp-guard: blocked — MCP tool input contains a token or key value.\n",
+    "stderr": "mcp-guard: blocked — MCP tool input contains a token or key value.\n",
     "stdout": ""
   },
   {
     "id": "mcp-benign",
     "exit": 0,
-    "stderr": "mcp-guard: warn — trufflehog not installed; secret detection degraded to the regex tiers (org markers and shared key shapes).\n",
+    "stderr": "",
     "stdout": ""
   },
   {
@@ -245,6 +245,12 @@
     "id": "mcp-core-missing",
     "exit": 2,
     "stderr": "mcp-guard: blocked — the guard-core library is missing, unreadable or incompatible; blocking as a precaution. Reinstall to restore it.\n",
+    "stdout": ""
+  },
+  {
+    "id": "mcp-unscannable",
+    "exit": 2,
+    "stderr": "mcp-guard: blocked — MCP tool input has too many fields, is too large, or is too deeply nested to scan.\n",
     "stdout": ""
   }
 ]

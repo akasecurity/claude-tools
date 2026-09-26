@@ -7,10 +7,11 @@
  *     blocks the named servers; a non-empty CT_MCP_ALLOW blocks every server not on it.
  *     Matching is case-insensitive. The lists are read from the install-COMPILED sidecar
  *     lib/mcp-policy.json; this hook never sources the user's shell config.
- *   - Secret scan over the whole tool input, keys and values at any depth: a detected
- *     secret (trufflehog, local and --no-verification), an org internal-identifier match
- *     (CT_EGRESS_PATTERNS via lib/org-egress.json) and a shared credential key-shape (from
- *     lib/secret-patterns.json). Input that is too large or too deeply nested to walk is
+ *   - Secret scan over the whole tool input, keys and values at any depth, on the regex
+ *     tiers only: an org internal-identifier match (CT_EGRESS_PATTERNS via
+ *     lib/org-egress.json) and a shared credential key-shape (from lib/secret-patterns.json).
+ *     trufflehog is not run here: this hook fires on every MCP call, so the per-call
+ *     process cost stays on the Bash and web egress guards. Input that is too large or too deeply nested to walk is
  *     blocked rather than passed unscanned. Skipped where ai-tc covers MCP tools in this
  *     profile; ai-tc does the content detection there.
  *
@@ -30,8 +31,11 @@
  *   - mcp-policy.json missing → no policy, silently (the plugin ships without one).
  *     Present but unreadable, unparseable or malformed → no policy, with a warning.
  *   - Config drifted from the compiled policy → advisory stale warning, never blocks.
- *   - Unparseable hook input or any unexpected error → FAIL CLOSED (exit 2) with a
- *     clear line. A guard that cannot read the call it is guarding blocks it.
+ *   - Unparseable hook input, a body that isn't a JSON object, a missing or non-string
+ *     tool_name, or any unexpected error → FAIL CLOSED (exit 2) with a clear line. A
+ *     guard that cannot read the call it is guarding blocks it.
+ *   - A string tool_name that isn't mcp__* → one warning line, exit 0 (a matcher
+ *     misconfiguration; that tool belongs to another guard).
  * Requires: bun.
  */
 import { readFileSync } from 'fs';
@@ -51,8 +55,12 @@ const CORE_MISSING_MSG = P + 'blocked — the guard-core library is missing, unr
 // map stays total so an unexpected one still reads well.
 const BLOCK_MSG: Record<RuleId, (server: string) => string> = {
   'mcp-server-denied': (s) => `blocked — MCP server "${s}" is denied by policy (CT_MCP_DENY).`,
-  'mcp-server-not-allowed': (s) => `blocked — MCP server "${s}" is not on the allow list (CT_MCP_ALLOW).`,
-  'mcp-input-unscannable': () => 'blocked — MCP tool input is too large or too deeply nested to scan.',
+  // A tool name with no server segment has no server to name; the core's reason says so.
+  'mcp-server-not-allowed': (s) => s
+    ? `blocked — MCP server "${s}" is not on the allow list (CT_MCP_ALLOW).`
+    : 'blocked — MCP tool name has no server segment; blocked by the allow list (CT_MCP_ALLOW).',
+  'mcp-input-unscannable': () => 'blocked — MCP tool input has too many fields, is too large, or is too deeply nested to scan.',
+  // Unreachable while the scanner is pinned to 'clean' (see main); kept so the map stays total.
   'secret-detected': () => 'blocked — MCP tool input contains a detected secret (trufflehog).',
   'org-marker': () => 'blocked — MCP tool input matches an internal identifier from aka-claude-tools.config.',
   'credential-shape': () => 'blocked — MCP tool input contains a token or key value.',
@@ -62,6 +70,7 @@ const BLOCK_MSG: Record<RuleId, (server: string) => string> = {
   'search-exec': () => 'blocked — MCP tool input was rejected by a Bash-only rule (search-exec).',
 };
 const NOTICE_MSG: Record<string, string> = {
+  // Not emitted while the scanner is pinned to 'clean'; kept for completeness.
   'scanner-unavailable': 'warn — trufflehog not installed; secret detection degraded to the regex tiers (org markers and shared key shapes).',
   'org-stale': 'warn — aka-claude-tools.config changed since install; the org-marker tier is using the last-compiled patterns. Re-run the installer to recompile them.',
   'org-pattern-invalid': 'warn — the compiled org-marker pattern is not a valid regex; org-marker tier skipped. Re-run the installer.',
@@ -155,12 +164,21 @@ function coreUnavailable(): never {
 }
 
 async function main(): Promise<void> {
-  // An unparseable body (or a JSON `null`, which throws on the property read below)
-  // reaches the top-level catch and blocks.
-  const input: HookInput = JSON.parse(readFileSync('/dev/stdin', 'utf-8'));
-  const tool = typeof input.tool_name === 'string' ? input.tool_name : '';
-  // MCP tools only; anything else is not this hook's surface.
-  if (!tool.startsWith('mcp__')) process.exit(0);
+  // An unparseable or non-object body, or one without a string tool_name, throws into
+  // the top-level catch and blocks.
+  const parsed: unknown = JSON.parse(readFileSync('/dev/stdin', 'utf-8'));
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('hook input is not a JSON object');
+  }
+  const input = parsed as HookInput;
+  if (typeof input.tool_name !== 'string') throw new Error('hook input has no string tool_name');
+  const tool = input.tool_name;
+  // MCP tools only. A non-MCP tool here means the hook is registered on the wrong
+  // matcher: say so once and let the call through (it is another guard's surface).
+  if (!tool.startsWith('mcp__')) {
+    console.error(P + `warn — invoked for non-MCP tool ${JSON.stringify(tool)}; not scanned (check the hook matcher).`);
+    process.exit(0);
+  }
 
   type Core = typeof import('./lib/guard-core.js');
   let core: Core;
@@ -186,9 +204,12 @@ async function main(): Promise<void> {
   let d: ReturnType<Core['evaluateMcpInput']>;
   let server: string;
   try {
-    server = core.mcpServerOf(tool) ?? tool;
+    server = core.mcpServerOf(tool) ?? '';
     d = core.evaluateMcpInput(tool, input.tool_input, {
       patterns: core.parsePatterns(loadPatternsRaw()),
+      // Regex tiers only (key shapes + org markers). mcp-guard runs on every MCP call,
+      // so trufflehog's per-call process cost stays on the Bash and web egress guards.
+      scanner: () => 'clean',
       org: loadOrgTier(),
       scanSecrets,
       ...(policy ? { mcp: policy } : {}),

@@ -61,6 +61,7 @@ expect_err "credential message" "$CRED_MSG"
 expect "benign MCP input" 0 "$h" "$bare" "$benign_in"
 expect_no_err "missing mcp-policy.json: no policy warning" "mcp-policy.json"
 expect "non-MCP tool passes through" 0 "$h" "$bare" '{"tool_name":"Bash","tool_input":{"command":"echo ghp_0123456789abcdefghij0123456789ABCD"}}'
+expect_err "non-MCP tool: matcher warning" 'mcp-guard: warn — invoked for non-MCP tool "Bash"; not scanned (check the hook matcher).'
 key_in="$(jq -cn --arg s "$GHP" '{tool_name:"mcp__github__x",tool_input:{($s):"v"}}')"
 expect "credential in an object key" 2 "$h" "$bare" "$key_in"
 
@@ -75,7 +76,20 @@ expect "other server, benign" 0 "$h" "$bare" "$benign_in"
 h="$(fresh_hooks allow)"; policy "$h" '{"allow":["linear"],"deny":[],"sourceHash":""}'
 expect "server not on the allow list" 2 "$h" "$bare" "$benign_in"
 expect_err "not-allowed message" "$GH_NOT_ALLOWED"
+expect "serverless tool name under an allow list" 2 "$h" "$bare" '{"tool_name":"mcp__x","tool_input":{}}'
+expect_err "serverless message" "mcp-guard: blocked — MCP tool name has no server segment; blocked by the allow list (CT_MCP_ALLOW)."
 expect "server on the allow list" 0 "$h" "$bare" '{"tool_name":"mcp__linear__list","tool_input":{"q":"x"}}'
+
+echo "regex tiers only (trufflehog never consulted):"
+stub="$tmp/stub"; mkdir -p "$stub"
+printf '#!/bin/sh\ncat >/dev/null\necho "{\\"DetectorName\\":\\"X\\"}"\n' > "$stub/trufflehog"; chmod +x "$stub/trufflehog"
+h="$(fresh_hooks regex)"
+set +e; printf '%s' "$benign_in" | PATH="$stub:$PATH" CLAUDE_CONFIG_DIR="$bare" bun "$h/mcp-guard.ts" >/dev/null 2>"$tmp/err"; GOT=$?; set -e
+[ "$GOT" = 0 ] && echo "  ok   benign allowed with an always-detecting trufflehog on PATH" \
+  || { echo "  FAIL benign blocked by trufflehog stub (exit $GOT)"; sed 's/^/       /' "$tmp/err"; fails=$((fails+1)); }
+expect_no_err "no trufflehog notice" "trufflehog"
+expect "credential still blocked by key shape" 2 "$h" "$bare" "$cred_in"
+expect_no_err "credential: no trufflehog notice" "trufflehog"
 
 echo "ai-tc present:"
 h="$(fresh_hooks aitc)"
@@ -112,7 +126,18 @@ expect_err "top-level catch message" "mcp-guard: blocked — unexpected error wh
 expect "unparseable stdin" 2 "$h" "$bare" '{not json'
 deep="$(jq -cn 'reduce range(0;80) as $i ("x"; {a:.}) | {tool_name:"mcp__github__x",tool_input:.}')"
 expect "too deeply nested input" 2 "$h" "$bare" "$deep"
-expect_err "unscannable message" "mcp-guard: blocked — MCP tool input is too large or too deeply nested to scan."
+expect_err "unscannable message" "mcp-guard: blocked — MCP tool input has too many fields, is too large, or is too deeply nested to scan."
+TOPLEVEL='mcp-guard: blocked — unexpected error while checking this MCP tool call; blocking as a precaution.'
+expect "missing tool_name, credential in input" 2 "$h" "$bare" "$(jq -cn --arg s "$GHP" '{tool_input:{body:$s}}')"
+expect_err "missing tool_name: top-level catch" "$TOPLEVEL"
+expect "non-string tool_name, credential in input" 2 "$h" "$bare" "$(jq -cn --arg s "$GHP" '{tool_name:7,tool_input:{body:$s}}')"
+expect_err "non-string tool_name: top-level catch" "$TOPLEVEL"
+for body in '[]' '"x"' '5'; do
+  expect "stdin $body (not an object)" 2 "$h" "$bare" "$body"
+  expect_err "stdin $body: top-level catch" "$TOPLEVEL"
+done
+rows="$(jq -cn '{tool_name:"mcp__db__insert",tool_input:{table:"t",rows:[range(0;3000) | {id:., name:("row-\(.)"), note:"ok"}]}}')"
+expect "3,000-row insert allows" 0 "$h" "$bare" "$rows"
 h="$(fresh_hooks nopat)"; rm -f "$h/lib/secret-patterns.json"
 expect "secret patterns missing" 2 "$h" "$bare" "$benign_in"
 expect_err "patterns-missing message" "mcp-guard: blocked — the secret patterns are missing or corrupt; blocking as a precaution. Reinstall to restore them."

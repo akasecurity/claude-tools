@@ -1398,7 +1398,8 @@ apply_additions() {
     add="$(jq --arg cmd "$(shq "$bun_bin") $cqd/hooks/mcp-guard.ts" \
       '.hooks.PreToolUse += [{matcher:"mcp__.*",hooks:[{type:"command",command:$cmd}]}]' <<<"$add")"
     ok "mcp-guard enabled (bun: $bun_bin)"
-    ensure_dep trufflehog "trufflehog (mcp-guard secret detection)" 0 || true
+    # No trufflehog offer here: mcp-guard runs the regex tiers only (it fires on every
+    # MCP call, so trufflehog's per-call cost stays on the Bash and web egress guards).
   fi
   if is_selected rtk-safe "$_sel_ids"; then
     # bun is guaranteed present here — the hard-dependency gate above aborts the install

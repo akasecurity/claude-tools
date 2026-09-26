@@ -1,6 +1,6 @@
 // @bun
 // package.json
-var version = "0.3.0";
+var version = "0.3.1";
 // src/shell/tokenize.ts
 var TOKENIZE_MAX_DEPTH = 40;
 function extractParen(s, from) {
@@ -641,7 +641,7 @@ var REASONS = {
   "credential-shape": "contains a credential value sent via an outbound tool.",
   "mcp-server-denied": "this MCP server is denied by policy.",
   "mcp-server-not-allowed": "this MCP server is not on the allow list.",
-  "mcp-input-unscannable": "MCP tool input is too large or too deeply nested to scan."
+  "mcp-input-unscannable": "MCP tool input has too many fields, is too large, or is too deeply nested to scan."
 };
 var block = (rule, notices, reason = REASONS[rule], detail) => ({ kind: "block", rule, reason, notices, ...detail === undefined ? {} : { detail } });
 function scannerNotice() {
@@ -722,7 +722,7 @@ function evaluateWebQuery(text, ctx = {}) {
 }
 // src/mcp.ts
 var MAX_DEPTH = 32;
-var MAX_LEAVES = 1e4;
+var MAX_LEAVES = 200000;
 var MAX_CHARS = 1e6;
 function mcpServerOf(tool) {
   if (!tool.startsWith("mcp__"))
@@ -798,11 +798,13 @@ function evaluateMcpInput(tool, input, ctx = {}) {
     return block2("mcp-server-denied", `MCP server "${server}" is denied by policy.`);
   if (serverLower && allow.length > 0 && !allow.includes(serverLower))
     return block2("mcp-server-not-allowed", `MCP server "${server}" is not on the allow list.`);
+  if (!serverLower && allow.length > 0)
+    return block2("mcp-server-not-allowed", "MCP tool name has no server segment; blocked by the allow list.");
   if (ctx.scanSecrets === false)
     return { kind: "allow", notices: [] };
   const leaves = flatten(input);
   if (leaves === null)
-    return block2("mcp-input-unscannable", "MCP tool input is too large, too deeply nested, cyclic, or not JSON-shaped, so it cannot be scanned.");
+    return block2("mcp-input-unscannable", "MCP tool input has too many fields, is too large, or is too deeply nested to scan.");
   return evaluateWebQuery(leaves.join(`
 `), ctx);
 }
