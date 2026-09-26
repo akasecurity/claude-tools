@@ -10,6 +10,14 @@
       "settings": "settings.base.json"
     },
     {
+      "id": "sandbox",
+      "name": "sandbox",
+      "prompt": "sandbox: enable Claude Code's native OS-level sandbox with credential denyRead?",
+      "recommended": false,
+      "description": "Opt-in: turns on Claude Code's native sandbox (sandbox.enabled, sandbox-exec on macOS / bwrap on Linux) and sets sandbox.filesystem.denyRead to the same paths `secure-settings` denies to the Read tool (~/.ssh, ~/.aws, .env, keychains, …), computed at install time from settings.base.json's `Read(...)` deny rules rather than duplicated. Closes a real gap: the Read-tool deny only binds the Read tool, so a Bash `cat ~/.aws/credentials` gets through it; the sandbox denies the read at the OS level regardless of which tool asks. Ships off by default because it changes runtime behavior (every tool call runs confined) and needs a platform dependency: always supported on macOS, requires `bwrap` on PATH on Linux (skipped with a notice if absent), skipped on any other platform. Deliberately narrow: does not set `autoAllowBashIfSandboxed` and does not touch `sandbox.network` — those remain the operator's own call.",
+      "settings": "settings.sandbox.json"
+    },
+    {
       "id": "leak-guard",
       "name": "leak-guard",
       "prompt": "leak-guard: block secrets + internal identifiers in WEB queries [bun]?",

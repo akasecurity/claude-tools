@@ -97,8 +97,11 @@ don't specify one:
   the recommended nonessential-traffic toggles that don't touch Remote Control
   (error-reporting-off, feedback-off, feedback-survey-off), the opt-out `/wrap-up`
   command, the opt-out secure-research and secure-deep-research workflows, the opt-out
-  harness-pointer, and the two opt-out traffic toggles telemetry-off (off by default
-  because it turns off Remote Control) and autoupdater-off. Additions with a
+  harness-pointer, the two opt-out traffic toggles telemetry-off (off by default
+  because it turns off Remote Control) and autoupdater-off, and the opt-in sandbox
+  addition (enables Claude Code's native OS-level sandbox with credential denyRead
+  derived from secure-settings; needs `bwrap` on PATH on Linux, always available on
+  macOS). Additions with a
   `skill` field are **directory copies**: copy the whole directory into
   `<dir>/skills/` (replace any existing copy so re-installs don't leave stale
   files). Additions with a `workflow` field are **file copies** into

@@ -376,6 +376,29 @@ prune_perms_env() {
         else . end )'
 }
 
+# prune_sandbox_keys <config_dir>  (settings json on stdin → pruned on stdout)
+# The sandbox addition's payload isn't a static file (denyRead is COMPUTED at install
+# time from settings.base.json — see apply_additions), so it can't be diffed against a
+# fixed payload file the way prune_perms_env diffs telemetry-off/error-reporting-off/etc.
+# Instead, remove EXACTLY the dotted key paths apply_additions recorded in the meta file
+# when it added them (meta key `sandbox_keys`, space-separated, e.g. "sandbox.enabled
+# sandbox.filesystem.denyRead") — so a sibling key under .sandbox the USER set themselves
+# (sandbox.network.allowLocalBinding, say) is never touched, on deselect or on a
+# skipped-platform re-run alike. No-op when nothing was ever recorded (never installed,
+# or installed then skipped on this platform). jq's del() is a no-op on an absent path
+# (no error), so a partial/never-populated .sandbox tree is safe to walk. Cleans up the
+# now-empty .sandbox.filesystem and .sandbox objects only when the LAST key under them
+# is gone, so a surviving sibling user key keeps its parent object.
+prune_sandbox_keys() {
+  local config_dir="$1" keys k prog="."
+  keys="$(meta_get "$config_dir" sandbox_keys)"
+  [ -z "$keys" ] && { cat; return; }
+  for k in $keys; do prog="${prog} | del(.${k})"; done
+  jq "${prog}
+    | (if (.sandbox.filesystem // {}) == {} then del(.sandbox.filesystem) else . end)
+    | (if (.sandbox // {}) == {} then del(.sandbox) else . end)"
+}
+
 # addition_owned_paths <id> <config_dir> → echo the files/dirs the addition owns.
 addition_owned_paths() {
   local id="$1" cfg="$2" key rel
@@ -411,6 +434,7 @@ prune_addition_from_settings() {
   # install; prune_statusline only drops the statusLine command, so remove that pinned
   # preference too (it is the only thing the kit writes under .preferences).
   [ "$id" = "statusline" ] && s="$(printf '%s' "$s" | jq 'if (.preferences|type)=="object" then (del(.preferences.location) | (if (.preferences=={}) then del(.preferences) else . end)) else . end')"
+  [ "$id" = "sandbox" ] && s="$(printf '%s' "$s" | prune_sandbox_keys "$config_dir")"
   [ -n "$setf" ] && [ -f "$CONFIG_SRC/$setf" ] && s="$(printf '%s' "$s" | prune_perms_env "$CONFIG_SRC/$setf")"
   printf '%s' "$s"
 }
@@ -1339,6 +1363,41 @@ apply_additions() {
   is_selected feedback-off         "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.feedback-off.json")"
   is_selected autoupdater-off      "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.autoupdater-off.json")"
   is_selected feedback-survey-off  "$_sel_ids" && add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.feedback-survey-off.json")"
+
+  # Opt-in native sandbox (settings-only, like the toggles above, but its payload isn't
+  # static): enables Claude Code's OS-level sandbox and denies reads on the SAME
+  # credential paths secure-settings denies to the Read tool — closing the gap where a
+  # Bash `cat ~/.aws/credentials` bypasses a Read-tool-only deny. denyRead is derived
+  # HERE from settings.base.json's `Read(<path>)` permission-deny rules via jq (map each
+  # to <path>), never duplicated as a second static list, so the two can't drift.
+  # Platform-gated: sandbox-exec ships with macOS (always supported); the Linux
+  # backend needs `bwrap` on PATH. CT_UNAME lets tests force the OS check without
+  # faking `uname` on PATH. Any other OS, or Linux without bwrap, skips with a notice
+  # (soft-skip, never die — this addition is opt-in, so an unsupported host just
+  # doesn't get it rather than aborting the whole install).
+  if is_selected sandbox "$_sel_ids"; then
+    local _sb_os; _sb_os="${CT_UNAME:-$(uname -s)}"
+    local _sb_supported=0
+    case "$_sb_os" in
+      Darwin) _sb_supported=1 ;;
+      Linux)  command -v bwrap >/dev/null 2>&1 && _sb_supported=1 ;;
+    esac
+    if [ "$_sb_supported" = "1" ]; then
+      local _sb_denyread
+      _sb_denyread="$(jq -c '[ (.permissions.deny // [])[]
+          | select(startswith("Read(") and endswith(")"))
+          | .[5:-1] ]' "$CONFIG_SRC/settings.base.json")"
+      add="$(jq -s --argjson dr "$_sb_denyread" \
+        '.[0] * (.[1] | .sandbox.filesystem.denyRead = $dr)' \
+        <(printf '%s' "$add") "$CONFIG_SRC/settings.sandbox.json")"
+      # Record exactly the key paths this addition adds, so deselect can remove
+      # exactly those and leave any OTHER user-set key under .sandbox untouched
+      # (see prune_addition_from_settings's sandbox case).
+      meta_set "$config_dir" sandbox_keys "sandbox.enabled sandbox.filesystem.denyRead"
+    else
+      warn "sandbox: bubblewrap (bwrap) not found; sandbox addition skipped."
+    fi
+  fi
 
   # Shared library the egress guards read (single source of truth for the
   # secret/outbound patterns) and the vendored guard-core (every bun guard hook).

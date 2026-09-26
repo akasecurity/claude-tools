@@ -127,6 +127,7 @@ Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.
 | Addition | What it does | Default |
 |---|---|---|
 | `secure-settings` | Denies reads of SSH keys, cloud creds, `.env`, keychains; blocks writes to shell startup files; no auto-loaded MCP servers. | ● on |
+| `sandbox` | Enables Claude Code's native OS-level sandbox and denies reads on the same credential paths `secure-settings` denies to the Read tool — so a Bash `cat ~/.aws/credentials` is blocked too, not just the Read tool. Needs `bwrap` on PATH on Linux (macOS always supported; skipped elsewhere with a notice). | ○ opt-in |
 | `leak-guard` | Scans what the agent sends to the web and blocks anything shaped like a secret. Scanned locally, nothing uploaded to check it. | ● on |
 | `command-guard` | Blocks `curl…\|bash`, edits to your shell startup files, and credentials being shipped out. | ● on |
 | `mcp-guard` | Applies your MCP server allow/deny lists (`CT_MCP_ALLOW` / `CT_MCP_DENY`) and blocks MCP tool inputs carrying anything shaped like a secret. It runs on every MCP call, so it checks key shapes and your org markers only; trufflehog stays on the Bash and web egress guards, for latency. The plugin install scans only; the lists come with the full kit. | ● on |
