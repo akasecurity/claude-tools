@@ -29,8 +29,17 @@ cp "$REPO/config/hooks/lib/secret-patterns.json" "$H/lib/secret-patterns.json"
 cp "$REPO/config/hooks/lib/guard-core.js" "$H/lib/guard-core.js"
 cp "$REPO/config/hooks/lib/guard-core.d.ts" "$H/lib/guard-core.d.ts" 2>/dev/null || true
 G="$H/command-guard.ts"
-rc(){ printf '%s' "$1" | bun "$G" >/dev/null 2>&1; echo $?; }
-out(){ printf '%s' "$1" | bun "$G" 2>&1 >/dev/null; }
+# The exempted command is still an outbound (curl) command, so guard-core's outbound
+# secret-scan tier still runs and still shells out to trufflehog — the pipe-to-shell
+# exemption only concerns the structural block, not the scan. A host without trufflehog
+# would otherwise leak a real "trufflehog not installed" degradation notice into every
+# "no output" assertion below, making this test's outcome depend on host tooling. Stub a
+# deterministic, always-clean trufflehog on PATH (same technique as test_scn_mcp_guard.sh)
+# so the scan tier always finds nothing, regardless of what's actually installed.
+STUB="$SB/stub"; mkdir -p "$STUB"
+printf '#!/bin/sh\ncat >/dev/null\n' > "$STUB/trufflehog"; chmod +x "$STUB/trufflehog"
+rc(){ printf '%s' "$1" | PATH="$STUB:$PATH" bun "$G" >/dev/null 2>&1; echo $?; }
+out(){ printf '%s' "$1" | PATH="$STUB:$PATH" bun "$G" 2>&1 >/dev/null; }
 bashjson(){ jq -n --arg v "$1" '{tool_name:"Bash",tool_input:{command:$v}}'; }
 write_sidecar(){ printf '%s' "$1" > "$H/lib/trusted-bootstrap.json"; }
 ALLOWED='curl -fsS https://get.example.dev/install/t.sh | bash'
