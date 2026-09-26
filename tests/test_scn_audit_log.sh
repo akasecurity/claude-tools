@@ -311,4 +311,60 @@ printf '%s' "$S_OUT" > "$SB/s.out"
 assert_ngrep "S: a hand-appended raw token is never printed" "$GHP_TOKEN" "$SB/s.out"
 assert_grep  "S: it still shows up redacted instead" '\[REDACTED:' "$SB/s.out"
 
+# ── T. a RELATIVE PROFILE_DIR / CT_CONFIG_DIR doesn't crash --audit-log ──────
+# render-audit-line.ts's dynamic import() resolves a relative path against ITS
+# OWN location (shared/lib/), not the caller's cwd — install.sh must absolute-ify
+# config_dir before it ever builds the guard-core.js path from it.
+(cd "$SB" && bash "$INSTALL" --audit-log ".claude-aka") >"$SB/t1.out" 2>&1
+assert_eq  "T: relative positional PROFILE_DIR exits 0" "0" "$?"
+assert_grep "T: relative positional PROFILE_DIR still renders the log" 'pipe-to-shell' "$SB/t1.out"
+
+(cd "$SB" && CT_CONFIG_DIR=".claude-aka" bash "$INSTALL" --audit-log) >"$SB/t2.out" 2>&1
+assert_eq  "T: relative CT_CONFIG_DIR exits 0" "0" "$?"
+assert_grep "T: relative CT_CONFIG_DIR still renders the log" 'pipe-to-shell' "$SB/t2.out"
+
+# ── U. a valid-JSON but non-object line (42, "s", []) doesn't abort either ───
+SBU="$(sandbox)"; DIRU="$SBU/.claude-aka"
+CT_CONFIG_DIR="$DIRU" CT_ADDITIONS="command-guard" HOME="$SBU" \
+  bash "$INSTALL" --apply --no-auth-inherit >"$SBU/install.log" 2>&1
+printf '%s' "$IN_PIPE" | CLAUDE_CONFIG_DIR="$DIRU" HOME="$SBU" bun "$DIRU/hooks/command-guard.ts" >/dev/null 2>&1
+LOGU="$DIRU/logs/security-${MONTH}.jsonl"
+printf '%s\n' '42' '"a string"' '[]' >> "$LOGU"
+U_OUT="$(CT_CONFIG_DIR="$DIRU" bash "$INSTALL" --audit-log 2>&1)"
+assert_eq "U: valid-JSON non-object lines don't abort --audit-log" "0" "$?"
+printf '%s' "$U_OUT" > "$SBU/u.out"
+assert_grep "U: all 3 non-object lines are reported as unparseable" '3 unparseable line' "$SBU/u.out"
+assert_grep "U: the real event still renders" 'pipe-to-shell' "$SBU/u.out"
+
+# ── V. a raw token hand-placed in `rule` is never printed (counts included) ──
+printf '%s\n' '{"ts":"2026-01-01T00:00:00.000Z","kit":"aka-claude-tools","harness":"claude","hook":"command-guard","kind":"block","rule":"'"$GHP_TOKEN"'","snippet":"benign"}' >> "$LOG"
+V_OUT="$(CT_CONFIG_DIR="$DIR" bash "$INSTALL" --audit-log 2>&1)"
+printf '%s' "$V_OUT" > "$SB/v.out"
+assert_ngrep "V: a raw-token rule value is never printed (incl. the by-rule counts)" "$GHP_TOKEN" "$SB/v.out"
+
+# ── W. bun missing → a clear, specific error ──────────────────────────────────
+path_without_bun() {
+  local d="$SB/nobun-bin" real t
+  mkdir -p "$d"
+  for t in bash sh env jq git awk sed grep egrep fgrep find mktemp dirname \
+           basename cat cp mv rm mkdir rmdir chmod date tr wc sort uniq head tail \
+           cut printf echo ln touch uname sleep comm diff stat tee xargs expr \
+           id whoami curl; do
+    real="$(command -v "$t" 2>/dev/null || true)"
+    [ -n "$real" ] && ln -sf "$real" "$d/$t"
+  done
+  printf '%s\n' "$d"
+}
+NOBUN_PATH="$(path_without_bun)"
+W_OUT="$(CT_CONFIG_DIR="$DIR" PATH="$NOBUN_PATH" bash "$INSTALL" --audit-log 2>&1)"
+assert_eq "W: bun missing — --audit-log exits nonzero" "1" "$?"
+printf '%s' "$W_OUT" > "$SB/w.out"
+assert_grep "W: names bun clearly as the missing requirement" 'bun is required to read the audit log' "$SB/w.out"
+
+# ── X. an unknown positional arg is harmless (ignored) OUTSIDE --audit-log ───
+X_OUT="$(HOME="$SB" bash "$INSTALL" --enumerate "/some/bogus/positional/path" 2>&1)"
+assert_eq "X: a stray positional arg in a non-audit-log mode still exits 0" "0" "$?"
+printf '%s' "$X_OUT" > "$SB/x.out"
+assert_ok "X: --enumerate output is still valid JSON despite the stray arg" jq -e '.' "$SB/x.out"
+
 t_summary
