@@ -37,4 +37,13 @@ for cat in skills hooks commands workflows; do
   done
 done
 
+# llms.txt catalogs the additions for agents in the form "`<id>` (<blurb>)". Every id named that way
+# must still exist in the manifest, or a retired addition keeps being offered (and CT_ADDITIONS
+# dies on it).
+while IFS= read -r cid; do
+  jq -e --arg id "$cid" '.additions[] | select(.id == $id)' "$ADDITIONS" >/dev/null \
+    && pass "llms.txt catalog id exists in additions.json: $cid" \
+    || fail "llms.txt catalog id exists in additions.json: $cid" "not in config/additions.json"
+done < <(grep -E '^(On by default|Opt-in):|Opt-in:' "$REPO_ROOT/llms.txt" | grep -oE '`[a-z][a-z0-9-]*` \(' | tr -d '`( ' | sort -u)
+
 t_summary

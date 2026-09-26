@@ -136,7 +136,7 @@ Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.
 | `statusline` | A status bar with live context-fill and rate-limit gauges. | ● on |
 | `shell-audit` | On-demand, read-only scan of your shell startup for hardcoded creds, risky hooks, and stale aliases. | ● on |
 | `wrap-up` | A `/wrap-up` command that summarizes, verifies, and stages a commit for review. Never commits on its own. | ○ opt-in |
-| `secure-deep-research` | Heavier research variant that adds per-claim adversarial verification before synthesis. Same privacy gating. | ○ opt-in |
+| `secure-deep-research` | Privacy-aware web research with per-claim adversarial verification before a cited synthesis. Sensitive topics are gated and routed through your own search instance. | ○ opt-in |
 | `harness-pointer` | A small nudge pointing the agent at the right CLI for your environment. Ships empty. | ○ opt-in |
 | `error-reporting-off` | Sets `DISABLE_ERROR_REPORTING` to opt out of Sentry error reporting. | ● on |
 | `feedback-off` | Sets `DISABLE_FEEDBACK_COMMAND` to disable the `/feedback` command. | ● on |

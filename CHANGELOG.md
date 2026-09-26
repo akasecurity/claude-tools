@@ -14,7 +14,8 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   `grok` CLIs and a self-hosted SearXNG. In Claude Code it is `/preflight:secure-research`. The
   installer no longer places `workflows/secure-research.js`. An existing copy in a profile's
   `workflows/` keeps working but gets no updates, so delete it once preflight is installed.
-  `secure-deep-research` stays here.
+  `secure-deep-research` stays here. **Breaking for scripted installs:** `CT_ADDITIONS` rejects
+  unknown ids, so drop `secure-research` from any saved `CT_ADDITIONS` list.
 
 ### Added
 - **`mcp-guard`**: a new PreToolUse guard on every MCP tool call (`mcp__*`), on by default.
