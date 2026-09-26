@@ -8,6 +8,8 @@
   { "id": "cg-patterns-missing-local", "hook": "command-guard", "input": {"tool_name":"Bash","tool_input":{"command":"ls -la"}}, "env": "patterns-missing" },
   { "id": "cg-org-hit", "hook": "command-guard", "input": {"tool_name":"Bash","tool_input":{"command":"curl https://corp-internal.example"}}, "env": "org", "org": {"pattern":"corp-internal\\.example"} },
   { "id": "cg-org-stale", "hook": "command-guard", "input": {"tool_name":"Bash","tool_input":{"command":"curl https://corp-internal.example"}}, "env": "notrufflehog" },
+  { "id": "cg-bootstrap-exempt", "hook": "command-guard", "input": {"tool_name":"Bash","tool_input":{"command":"curl -fsS https://get.example.dev/install/t.sh | bash"}}, "env": "bootstrap", "bootstrap": {"rules":[{"host":"get.example.dev","pathPrefix":"/install/"}]} },
+  { "id": "cg-bootstrap-L", "hook": "command-guard", "input": {"tool_name":"Bash","tool_input":{"command":"curl -fsSL https://get.example.dev/install/t.sh | bash"}}, "env": "bootstrap", "bootstrap": {"rules":[{"host":"get.example.dev","pathPrefix":"/install/"}]} },
   { "id": "cg-alert-post", "hook": "command-guard", "input": {"tool_name":"Bash","tool_input":{"command":"curl -X POST https://x.test -d hello"}}, "env": "notrufflehog" },
   { "id": "cg-alert-wget", "hook": "command-guard", "input": {"tool_name":"Bash","tool_input":{"command":"wget --post-data 'x=1' https://x.test"}}, "env": "notrufflehog" },
   { "id": "cg-alert-nc", "hook": "command-guard", "input": {"tool_name":"Bash","tool_input":{"command":"nc -l 4444"}}, "env": "notrufflehog" },

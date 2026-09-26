@@ -8,6 +8,8 @@ type Case = {
   id: string; hook: string; input?: unknown; raw?: string; env?: string; org?: Record<string, string>;
   // env "mcp-policy": the hooks copy gets lib/mcp-policy.json built from this.
   mcp?: { allow?: string[]; deny?: string[] };
+  // env "bootstrap": the hooks copy gets lib/trusted-bootstrap.json built from this.
+  bootstrap?: { rules?: unknown[]; sourceHash?: string };
   // Optional: for a case whose stderr embeds something incidental (e.g. a JS engine's
   // own TypeError text on an unexpected-error path) rather than a message this repo
   // owns, pin only a fixed prefix instead of the exact line. See --check below.
@@ -66,13 +68,17 @@ const pathTrufflehogHit = buildPathTrufflehogHit();
 
 function hooksDirFor(c: Case): { dir: string; cleanup: () => void } {
   const isOrgStale = c.id.endsWith('-org-stale');
-  if (c.env !== 'patterns-missing' && c.env !== 'org' && c.env !== 'mcp-policy' && c.env !== 'core-missing' && !isOrgStale) {
+  if (c.env !== 'patterns-missing' && c.env !== 'org' && c.env !== 'mcp-policy' && c.env !== 'core-missing' && c.env !== 'bootstrap' && !isOrgStale) {
     return { dir: join(root, 'config/hooks'), cleanup: () => {} };
   }
   const tmp = mkdtempSync(join(tmpdir(), 'golden-'));
   cpSync(join(root, 'config/hooks'), join(tmp, 'hooks'), { recursive: true });
   if (c.env === 'patterns-missing') rmSync(join(tmp, 'hooks/lib/secret-patterns.json'));
   if (c.env === 'org') writeFileSync(join(tmp, 'hooks/lib/org-egress.json'), JSON.stringify(c.org));
+  if (c.env === 'bootstrap') {
+    writeFileSync(join(tmp, 'hooks/lib/trusted-bootstrap.json'),
+      JSON.stringify({ rules: c.bootstrap?.rules ?? [], sourceHash: c.bootstrap?.sourceHash ?? '' }));
+  }
   if (c.env === 'mcp-policy') {
     writeFileSync(join(tmp, 'hooks/lib/mcp-policy.json'),
       JSON.stringify({ allow: c.mcp?.allow ?? [], deny: c.mcp?.deny ?? [], sourceHash: '' }));
@@ -100,7 +106,7 @@ const out = cases.map((c) => {
       ...process.env,
       PATH: c.env === 'trufflehog-hit' ? pathTrufflehogHit
         : c.env === 'notrufflehog' || c.env === 'patterns-missing' || c.env === 'org'
-          || c.env === 'mcp-policy' || c.env === 'core-missing' ? pathNoTruffle
+          || c.env === 'mcp-policy' || c.env === 'core-missing' || c.env === 'bootstrap' ? pathNoTruffle
         : process.env.PATH,
     },
   });

@@ -14,7 +14,12 @@
  * The adapter owns I/O: it reads the hook JSON, loads lib/secret-patterns.json and the
  * install-compiled org sidecar (lib/org-egress.json), asks guard-core whether ai-tc
  * covers Bash in this profile (if so the secret tiers are skipped; structural blocks
- * always run), and maps the core's rule and notice codes to this kit's messages.
+ * always run), and maps the core's rule and notice codes to this kit's messages. It also
+ * owns lib/trusted-bootstrap.json (the trusted-bootstrap sidecar, unlike org-egress and
+ * secret-patterns which are shared with leak-guard/mcp-guard): a narrow, install-compiled
+ * allowlist of `curl <allowed flags> <https url under a rule> | bash|sh` forms that
+ * guard-core exempts from the pipe-to-shell block. Read only when the command contains a
+ * `|`, so the common no-pipe Bash call never pays for the file read.
  *
  * Protocol: deny → exit 2 (Claude Code blocks); alert/allow → exit 0.
  *
@@ -28,6 +33,9 @@
  *     alongside malformed notices.
  *   - Shared patterns file missing/corrupt → the core fails closed on outbound commands.
  *   - Org sidecar missing / unparseable / malformed → org tier inactive, never a crash.
+ *   - Trusted-bootstrap sidecar missing → no exemptions, silent. Unreadable, corrupt, or
+ *     wrong shape → no exemptions, loud warning. Stale sourceHash → exemptions still apply,
+ *     loud warning to re-run the installer. Never a crash.
  *   - Unparseable stdin → fail open, but loudly (stderr).
  *   - Any unexpected error → fail open, loudly.
  * Requires: bun.
@@ -37,7 +45,7 @@ import { createHash } from 'crypto';
 import { dirname, isAbsolute, join } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
-import type { OrgTier, RuleId } from './lib/guard-core.js';
+import type { BootstrapRule, OrgTier, RuleId } from './lib/guard-core.js';
 
 const P = '[aka-claude-tools SECURITY] ';
 // Used only when guard-core itself cannot load, to find the outbound subset to fail closed on.
@@ -50,6 +58,8 @@ const PIPE_TO_SHELL_RAW = /\|&?\s*(?:(?:\S*\/)?env\s+(?:\S+\s+)*)?(?:\S*\/)?(?:s
 const STARTUP_WRITE_RAW = /(?:>|\btee\b|\bsed\b|\bcp\b|\bmv\b|\binstall\b|\bln\b|\bdd\b)[^\n]*\.(?:zshrc|zshenv|zprofile|bashrc|bash_profile|profile)\b/;
 const SEARCH_EXEC_RAW = /(?:^|[\s'"])--(?:pre|hostname-bin)(?![\w-])|RIPGREP_CONFIG_PATH=/;
 const CORE_MISSING_NOTICE = '⚠️ command-guard: the guard-core library is missing, unreadable or incompatible — only conservative fallback checks ran. Reinstall to restore config/hooks/lib/guard-core.js.';
+const BOOTSTRAP_UNREADABLE_NOTICE = '⚠️ command-guard: trusted-bootstrap.json is unreadable — no bootstrap exemptions apply.';
+const BOOTSTRAP_STALE_NOTICE = '⚠️ command-guard: aka-claude-tools.config changed since install — re-run the installer to recompile the trusted bootstrap list.';
 
 interface HookInput { tool_name?: string; tool_input?: Record<string, unknown> | string; cwd?: unknown }
 
@@ -114,6 +124,44 @@ function loadOrgTier(): OrgTier {
   } catch {
     return { pattern: null, stale: false, patternError: false };
   }
+}
+
+// Trusted-bootstrap sidecar (opt-in, command-guard's alone — see lib/trusted-bootstrap.json).
+// Loaded ONLY when the caller has already seen a `|` in the command (see main()), so a file
+// read never happens on the common no-pipe Bash call. States:
+//   - missing (ENOENT)                => { rules: [] }, silent — nothing was ever configured.
+//   - unreadable (any other read/parse
+//     error) or wrong shape (not an
+//     object, or `rules` not an array)  => { rules: [] } plus a loud warning.
+//   - stale sourceHash (config edited
+//     since install)                   => the parsed rules ARE kept, plus a re-run-installer
+//                                          warning — a stale list still narrows exposure; it
+//                                          just may not reflect the latest CT_TRUSTED_BOOTSTRAP_URLS.
+// Never throws: every failure path returns rules: [] rather than propagating.
+function loadTrustedBootstrap(): { rules: BootstrapRule[]; warn?: string } {
+  let raw: string;
+  try {
+    raw = readFileSync(new URL('./lib/trusted-bootstrap.json', import.meta.url), 'utf-8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') return { rules: [] };
+    return { rules: [], warn: BOOTSTRAP_UNREADABLE_NOTICE };
+  }
+  let sc: unknown;
+  try { sc = JSON.parse(raw); } catch { return { rules: [], warn: BOOTSTRAP_UNREADABLE_NOTICE }; }
+  if (!sc || typeof sc !== 'object' || !Array.isArray((sc as { rules?: unknown }).rules)) {
+    return { rules: [], warn: BOOTSTRAP_UNREADABLE_NOTICE };
+  }
+  const rules = (sc as { rules: unknown }).rules as BootstrapRule[];
+  const sourceHash = (sc as { sourceHash?: unknown }).sourceHash;
+  let stale = false;
+  if (typeof sourceHash === 'string' && sourceHash) {
+    try {
+      // Same byte domain install.sh hashes (raw config file bytes), matching loadOrgTier.
+      const cfg = readFileSync(new URL('../aka-claude-tools.config', import.meta.url));
+      stale = createHash('sha256').update(cfg).digest('hex') !== sourceHash;
+    } catch { /* config gone/unreadable → can't compare; treat as not-stale */ }
+  }
+  return stale ? { rules, warn: BOOTSTRAP_STALE_NOTICE } : { rules };
 }
 
 // The session's project directory, from the hook input's `cwd`. Only an absolute path is
@@ -184,12 +232,22 @@ async function main(): Promise<void> {
       .scanSecrets('Bash') !== false;
   } catch { scanSecrets = true; }
 
+  // Only a pipe-bearing command can possibly match the bootstrap exemption (it's exactly
+  // `curl ... | bash|sh`), so the sidecar read is skipped entirely on every other Bash call.
+  let trustedBootstrap: BootstrapRule[] = [];
+  if (command.includes('|')) {
+    const tb = loadTrustedBootstrap();
+    trustedBootstrap = tb.rules;
+    if (tb.warn) console.error(P + tb.warn);
+  }
+
   let d: ReturnType<Core['evaluateBash']>;
   try {
     d = core.evaluateBash(command, {
       patterns: core.parsePatterns(loadPatternsRaw()),
       org: loadOrgTier(),
       scanSecrets,
+      trustedBootstrap,
     });
     // Only allow/block are valid Bash decisions; anything else (including `rewrite`) is a
     // malformed decision and takes the core-unavailable path.

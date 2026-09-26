@@ -54,6 +54,18 @@
     "stdout": ""
   },
   {
+    "id": "cg-bootstrap-exempt",
+    "exit": 0,
+    "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n",
+    "stdout": ""
+  },
+  {
+    "id": "cg-bootstrap-L",
+    "exit": 2,
+    "stderr": "[aka-claude-tools SECURITY] 🚨 BLOCKED (command-guard): piping output into a shell interpreter (curl … | bash). Download, inspect, then run.\n",
+    "stdout": ""
+  },
+  {
     "id": "cg-alert-post",
     "exit": 0,
     "stderr": "[aka-claude-tools SECURITY] ⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).\n[aka-claude-tools SECURITY] ⚠️ egress alert (command-guard): curl HTTP upload (POST / --data) (allowed).\n",
