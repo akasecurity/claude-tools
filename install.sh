@@ -1289,15 +1289,18 @@ apply_additions() {
   # empty dir at apply_entry, which is benign — no settings/payload/rc are written).
   # command-guard, leak-guard and mcp-guard are default-on SECURITY hooks whose runtime
   # is bun; shipping one silently disabled is not an option, so a missing bun ABORTS rather
-  # than soft-skips. The statusline and rtk-safe are .ts hooks that also cannot run without
-  # bun (they can't degrade like the old bash versions), so bun is required when ANY of the
-  # five is selected — a selection with none still installs. ensure_dep offers to install
-  # bun first (interactive); it die()s only on decline / non-interactive-absent, so a
-  # partial apply is impossible.
+  # than soft-skips. The statusline, rtk-safe and prompt-guard are .ts hooks that also
+  # cannot run without bun (they can't degrade like the old bash versions), so bun is
+  # required when ANY of the six is selected — a selection with none still installs.
+  # prompt-guard is opt-in and warn-only at RUNTIME, but at INSTALL time it needs the same
+  # gate as the others: the registration below embeds bun's resolved absolute path, and
+  # there is no such path to embed without bun present. ensure_dep offers to install bun
+  # first (interactive); it die()s only on decline / non-interactive-absent, so a partial
+  # apply is impossible.
   if is_selected command-guard "$_sel_ids" || is_selected leak-guard "$_sel_ids" \
-     || is_selected mcp-guard "$_sel_ids" \
+     || is_selected mcp-guard "$_sel_ids" || is_selected prompt-guard "$_sel_ids" \
      || is_selected statusline "$_sel_ids" || is_selected rtk-safe "$_sel_ids"; then
-    ensure_dep bun "bun — required runtime for command-guard, leak-guard, mcp-guard, statusline, and/or rtk-safe" 1
+    ensure_dep bun "bun — required runtime for command-guard, leak-guard, mcp-guard, prompt-guard, statusline, and/or rtk-safe" 1
     # Warn ONCE per run (not once per hook below) when the bun about to be baked into
     # every selected hook's absolute path is the one npm installed alongside THIS
     # package (its own node_modules, or the hoisted ../../.bin one level up), not a
@@ -1341,8 +1344,12 @@ apply_additions() {
   # secret/outbound patterns) and the vendored guard-core (every bun guard hook).
   # Placed whenever any consumer is selected, so bash and TS both resolve
   # config/hooks/lib/{secret-patterns.json,guard-core.js} relative to themselves.
+  # prompt-guard reads the same secret-patterns.json (for its credential-pairing tier)
+  # and guard-core.js (scanPrompt, detectAitc), so it's a consumer too — its own missing-
+  # patterns/missing-core paths just degrade silently rather than failing closed.
   if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" \
-    || is_selected mcp-guard "$_sel_ids" || is_selected rtk-safe "$_sel_ids"; then
+    || is_selected mcp-guard "$_sel_ids" || is_selected rtk-safe "$_sel_ids" \
+    || is_selected prompt-guard "$_sel_ids"; then
     place_dir "$CONFIG_SRC/hooks/lib" "$config_dir/hooks"
   fi
 
@@ -1400,6 +1407,20 @@ apply_additions() {
     ok "mcp-guard enabled (bun: $bun_bin)"
     # No trufflehog offer here: mcp-guard runs the regex tiers only (it fires on every
     # MCP call, so trufflehog's per-call cost stays on the Bash and web egress guards).
+  fi
+  if is_selected prompt-guard "$_sel_ids"; then
+    # bun is guaranteed present here — the hard-dependency gate above aborts the install
+    # if prompt-guard is selected without bun (the .ts can't degrade-run, same as the
+    # other bun hooks). Opt-in and warn-only: no trufflehog offer (it never scans for
+    # verified secrets, only key shapes), and no dangerous-flag heads-up (it never blocks).
+    local bun_bin; bun_bin="$(command -v bun)"
+    place_file "$CONFIG_SRC/hooks/prompt-guard.ts" "$config_dir/hooks" +x
+    # UserPromptSubmit has no matcher (it fires on every submitted prompt, not a tool
+    # call). Register with bun's ABSOLUTE path (same two-token quoted shape as the other
+    # bun hooks): both tokens shq()-quoted so spaces/metachars/quotes don't split.
+    add="$(jq --arg cmd "$(shq "$bun_bin") $cqd/hooks/prompt-guard.ts" \
+      '.hooks.UserPromptSubmit += [{hooks:[{type:"command",command:$cmd}]}]' <<<"$add")"
+    ok "prompt-guard enabled (bun: $bun_bin)"
   fi
   if is_selected rtk-safe "$_sel_ids"; then
     # bun is guaranteed present here — the hard-dependency gate above aborts the install
@@ -1657,15 +1678,16 @@ apply_additions() {
 
   # 4d-pre1a. The shared egress-guard libs (hooks/lib/secret-patterns.json and the
   # compiled hooks/lib/org-egress.json sidecar) are owned by NO single addition — they're
-  # placed/compiled whenever any egress guard (leak-guard, command-guard, mcp-guard) is
+  # placed/compiled whenever any egress guard (leak-guard, command-guard, mcp-guard) or
+  # prompt-guard (its credential-pairing tier reads secret-patterns.json too) is
   # selected. The per-addition deselect loop above can't remove them (no guard's
   # owned-paths list includes them), so deselecting every guard would orphan them.
-  # Remove both only when NO egress guard remains. The vendored guard-core has a wider
-  # consumer set (every bun guard hook, including rtk-safe), so it's cleaned up
+  # Remove both only when NO consumer remains. The vendored guard-core has a wider
+  # consumer set still (every bun guard hook, including rtk-safe), so it's cleaned up
   # separately below — only once NO consumer remains does the now-empty hooks/lib dir
   # come down.
   if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids" \
-    && ! is_selected mcp-guard "$_sel_ids"; then
+    && ! is_selected mcp-guard "$_sel_ids" && ! is_selected prompt-guard "$_sel_ids"; then
     _egress_lib_removed=
     for _lib in secret-patterns.json org-egress.json; do
       if [ -e "$config_dir/hooks/lib/$_lib" ]; then
@@ -1691,7 +1713,8 @@ apply_additions() {
     ok "Removed MCP policy sidecar (mcp-guard not selected)"
   fi
   if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids" \
-    && ! is_selected mcp-guard "$_sel_ids" && ! is_selected rtk-safe "$_sel_ids"; then
+    && ! is_selected mcp-guard "$_sel_ids" && ! is_selected rtk-safe "$_sel_ids" \
+    && ! is_selected prompt-guard "$_sel_ids"; then
     rm -f "$config_dir/hooks/lib/guard-core.js" "$config_dir/hooks/lib/guard-core.d.ts" \
       "$config_dir/hooks/lib/guard-core.lock.json"
     rmdir "$config_dir/hooks/lib" 2>/dev/null || true

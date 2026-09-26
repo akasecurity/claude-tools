@@ -43,6 +43,15 @@
       "usesConfig": true
     },
     {
+      "id": "prompt-guard",
+      "name": "prompt-guard",
+      "prompt": "prompt-guard: warn (never block) on prompt-injection phrasing, credential exfil pairing, and encoded shell blobs in what YOU type [bun]?",
+      "recommended": false,
+      "description": "UserPromptSubmit hook that scans the prompt you just typed, not a tool call: a prompt-injection marker (\"ignore previous instructions\", …), a credential value paired with a send/post/upload verb (using the shared secret-patterns corpus), and a base64/hex blob that decodes to a shell command. WARNS ONLY — it never blocks, never edits your prompt, and never adds anything to the model's context; the warning surfaces to you via Claude Code's systemMessage channel. Opt-in and off by default because it is a heads-up for content YOU authored, not an egress boundary like the other guards. Requires bun, like the other bun hooks in this kit (a missing bun aborts the install if selected, the same as command-guard/leak-guard/mcp-guard/statusline/rtk-safe, rather than embedding an unresolvable interpreter path); once installed, a runtime failure of any kind here degrades to silence, never to a block. When ai-tc is installed and enabled for this profile it narrows to the injection-marker check alone, deferring the rest to ai-tc's own prompt-content detection.",
+      "hook": "hooks/prompt-guard.ts",
+      "event": "UserPromptSubmit"
+    },
+    {
       "id": "rtk-safe",
       "name": "rtk-safe",
       "prompt": "rtk-safe: conservative rtk rewrites for token savings [bun; needs rtk >= 0.49.0]?",
