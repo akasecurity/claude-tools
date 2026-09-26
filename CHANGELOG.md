@@ -9,6 +9,39 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 ## [Unreleased]
 
 ### Added
+- **`mcp-guard`**: a new PreToolUse guard on every MCP tool call (`mcp__*`), on by default.
+  Applies an MCP server allow/deny policy first (`CT_MCP_DENY` blocks named servers; a
+  non-empty `CT_MCP_ALLOW` blocks every server not on it, both case-insensitive, compiled
+  into an install-time `mcp-policy.json` sidecar), then scans the whole tool input, keys
+  and values at any depth, for token/SSH-key shapes and configured org markers. Regex tiers
+  only (no trufflehog, for per-call latency); input too large or too deeply nested to scan
+  is blocked rather than passed. Defers to ai-tc for content detection where ai-tc covers
+  MCP tools in the profile, while the server policy still applies.
+- **Trusted bootstrap allowlist** for `command-guard`: an opt-in `CT_TRUSTED_BOOTSTRAP_URLS`
+  (space-separated `https://host/path/` prefixes) that exempts a narrow `curl <-f/-s/-S
+  flags only> <an allowed https URL> | bash`/`| sh` shape from the pipe-to-shell block, for
+  legitimate installer scripts. Off by default; anything outside that exact shape (an extra
+  flag, an unlisted host or path) still blocks. Compiled into an install-time
+  `trusted-bootstrap.json` sidecar; a stale sidecar (config changed since compile) still
+  applies with a warning rather than silently disabling.
+- **`prompt-guard`**: a new opt-in `UserPromptSubmit` hook that warns, never blocks, on
+  content in what you typed: prompt-injection phrasing, a credential value paired with a
+  send/post/upload verb, and base64/hex blobs that decode to a shell command. Surfaces via
+  Claude Code's `systemMessage` channel; never edits the prompt or adds anything to the
+  model's context. Narrows to the injection-marker check alone when ai-tc is installed and
+  covers prompt content for the profile.
+- **`sandbox`**: a new opt-in addition that sets `sandbox.enabled`, turning on Claude Code's
+  native OS-level sandbox (`sandbox-exec` on macOS, `bwrap` on Linux) so Bash and every other
+  tool run confined at the OS level, not just the Read tool's own deny rules. Deliberately
+  does not also write `sandbox.filesystem.denyRead` — Claude Code's own sandbox already
+  merges `secure-settings`'s `Read(...)` credential-deny rules into its effective filesystem
+  denylist at runtime with correct glob resolution, so a kit-written copy would be
+  re-resolved under the sandbox's own narrower path rules and silently protect nothing. A
+  pre-existing `sandbox.enabled` value is stashed and restored if the addition is later
+  deselected; deselecting re-disables it (a manual edit back to `false` while selected is
+  warned about and reverted on the next apply).
+- Vendored **guard-core 0.3.1**, the shared decision-logic library `command-guard`,
+  `leak-guard`, `rtk-safe`, and now `mcp-guard` run on.
 - `command-guard` blocks ripgrep's arbitrary-execution vectors: `--pre`,
   `--hostname-bin`, and `RIPGREP_CONFIG_PATH` (which points `rg` at a file of flags,
   injecting `--pre` without either flag appearing in the command text). All three are

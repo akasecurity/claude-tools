@@ -79,3 +79,60 @@ CT_EGRESS_PATTERNS=""
 #   CT_BLOCKED_HINT="This repo standardises on bun — use bun / bunx instead."
 CT_BLOCKED_CMDS=""
 CT_BLOCKED_HINT="This command isn't the right tool in this environment (aka-claude-tools harness-pointer) — see aka-claude-tools.config for the intended approach."
+
+
+# ── mcp-guard.ts — MCP server allow/deny policy ─
+# Threat model: an auto-loaded or third-party MCP server you didn't mean to grant tool
+# access to. This policy is checked BEFORE the secret scan, on every mcp__* tool call.
+#
+# CT_MCP_ALLOW / CT_MCP_DENY — comma-separated MCP SERVER NAMES (not tool names): the
+# segment right after "mcp__" in the tool name (mcp__<server>__<tool>). Matched
+# case-insensitively. No spaces around commas, no leading/trailing/doubled commas
+# (install.sh rejects those). CT_MCP_DENY is checked first: a server on it is always
+# blocked. If CT_MCP_ALLOW is non-empty, every server NOT on it is blocked too (an empty
+# CT_MCP_ALLOW means "no allow-list restriction", not "deny everything"). Both are
+# compiled into an install-time sidecar (hooks/lib/mcp-policy.json); edit here, then
+# re-run ./install.sh to apply.
+#
+# Example — allow only two servers, and explicitly deny a third even if it later
+# appears on the allow list by mistake:
+#   CT_MCP_ALLOW="searxng,hiring-data"
+#   CT_MCP_DENY="some-untrusted-server"
+CT_MCP_ALLOW=""
+CT_MCP_DENY=""
+
+
+# ── command-guard.ts — trusted bootstrap allowlist ─
+# Threat model: legitimate installer scripts (rustup, nvm, …) are conventionally piped
+# into a shell (`curl … | bash`), which is indistinguishable in shape from a malicious
+# pipe-to-shell. Off by default — command-guard blocks ALL curl|bash forms until you
+# name specific installer URL prefixes to trust.
+#
+# CT_TRUSTED_BOOTSTRAP_URLS — a SPACE-separated list of "https://host/path/" prefixes
+# (note the required trailing slash — a prefix, never a specific file). Only an EXACT
+# command shape is exempted, and only when it matches: `curl <allowed flags> <https url
+# under one of these prefixes> | bash` or `| sh` — nothing else on the command line, no
+# other pipe segment, no other positional argument. Allowed curl flags are exactly
+# -f/-s/-S in any combination (and their long forms --fail/--silent/--show-error), plus
+# --tlsv1.2 and --proto=https; anything else (including the common -L to follow
+# redirects) falls outside the exemption and still blocks. The URL itself must be
+# https, with no userinfo, port, query string, or fragment, and its path may not
+# contain "." or ".." segments.
+#
+# Example:
+#   CT_TRUSTED_BOOTSTRAP_URLS="https://sh.rustup.rs/ https://get.example.dev/install/"
+#
+# Residual risks — read before relying on this as a security boundary:
+#   - curl itself reads ~/.curlrc (and $CURL_HOME/.curlrc) by default, which can inject
+#     flags — including a redirect follow (-L / --location) — that never appear in the
+#     command text this guard inspects. A permissive .curlrc can widen what an allowed
+#     URL actually fetches and executes, invisibly to this allowlist.
+#   - The sidecar's staleness check only detects that aka-claude-tools.config changed
+#     since the sidecar was compiled (by comparing a hash of the config file). It does
+#     NOT verify that the sidecar's own contents still match what that config would
+#     compile to; a stale sidecar still applies its (possibly out-of-date) rules, with
+#     a warning, rather than being disabled.
+#   - A pathPrefix of exactly "/" matches every path on that host — it allowlists the
+#     WHOLE host, not just an install-script directory. Scope pathPrefix as narrowly as
+#     the installer's real URL layout allows.
+CT_TRUSTED_BOOTSTRAP_URLS=""

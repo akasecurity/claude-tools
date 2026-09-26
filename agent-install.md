@@ -97,7 +97,9 @@ don't specify one:
   the recommended nonessential-traffic toggles that don't touch Remote Control
   (error-reporting-off, feedback-off, feedback-survey-off), the opt-out `/wrap-up`
   command, the opt-out secure-research and secure-deep-research workflows, the opt-out
-  harness-pointer, the two opt-out traffic toggles telemetry-off (off by default
+  harness-pointer, the opt-out prompt-guard (needs `bun`; warns, never blocks, on
+  prompt-injection phrasing, a credential paired with a send/upload instruction, and
+  encoded shell blobs in what the user typed), the two opt-out traffic toggles telemetry-off (off by default
   because it turns off Remote Control) and autoupdater-off, and the opt-in sandbox
   addition (changes Bash behaviour in every session: enables Claude Code's native
   OS-level sandbox, which already merges secure-settings's credential Read-denies into
