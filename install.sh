@@ -114,7 +114,7 @@ ensure_dep jq "jq (required)" 1
 # (engine) mode, which is invoked programmatically and only needs jq.
 if [ "$CT_APPLY" != "1" ] && [ "$CT_ALIAS_MODE" != "1" ] && [ "$CT_DELETE_ALIAS" != "1" ] && [ "$CT_ENUMERATE" != "1" ]; then
   command -v claude >/dev/null 2>&1 || warn "claude CLI not found on PATH — the alias will still be written, but install Claude Code to use it."
-  # bun (command-guard) and trufflehog (leak-guard) are checked/offered when those
+  # bun (the guard hooks) and trufflehog (the secret scans) are checked/offered when those
   # additions are selected — see the build step below.
 
   say ""
@@ -1035,10 +1035,9 @@ _mcp_server_name_to_json() {
 }
 
 # compile_mcp_policy_sidecar <config_dir> — compile CT_MCP_ALLOW / CT_MCP_DENY (each a
-# comma-separated list of MCP server names) into hooks/lib/mcp-policy.json. mcp-guard
-# doesn't exist in this kit yet (a later task adds it); until then this sidecar is
-# placed and removed alongside the rest of the shared egress-guard libs — the same
-# is_selected gate as compile_org_sidecar, both at the call site and in cleanup.
+# comma-separated list of MCP server names) into hooks/lib/mcp-policy.json, the sidecar
+# mcp-guard reads at runtime. Owned by mcp-guard alone: compiled only when mcp-guard is
+# selected and removed when it is deselected; see the call site and cleanup below.
 # Modeled exactly on compile_org_sidecar: subshell-source, validate, atomic publish.
 compile_mcp_policy_sidecar() {
   local config_dir="$1"
@@ -1288,16 +1287,17 @@ apply_additions() {
   # required runtime aborts cleanly with no partial apply (in interactive mode the
   # profile dir isn't created until the build mkdir below; --apply pre-creates an
   # empty dir at apply_entry, which is benign — no settings/payload/rc are written).
-  # command-guard and leak-guard are default-on SECURITY hooks whose runtime is bun;
-  # shipping one silently disabled is not an option, so a missing bun ABORTS rather than
-  # soft-skips. The statusline and rtk-safe are .ts hooks that also cannot run without bun
-  # (they can't degrade like the old bash versions), so bun is required when ANY of the
-  # four is selected — a selection with none still installs. ensure_dep offers to install
+  # command-guard, leak-guard and mcp-guard are default-on SECURITY hooks whose runtime
+  # is bun; shipping one silently disabled is not an option, so a missing bun ABORTS rather
+  # than soft-skips. The statusline and rtk-safe are .ts hooks that also cannot run without
+  # bun (they can't degrade like the old bash versions), so bun is required when ANY of the
+  # five is selected — a selection with none still installs. ensure_dep offers to install
   # bun first (interactive); it die()s only on decline / non-interactive-absent, so a
   # partial apply is impossible.
   if is_selected command-guard "$_sel_ids" || is_selected leak-guard "$_sel_ids" \
+     || is_selected mcp-guard "$_sel_ids" \
      || is_selected statusline "$_sel_ids" || is_selected rtk-safe "$_sel_ids"; then
-    ensure_dep bun "bun — required runtime for command-guard, leak-guard, statusline, and/or rtk-safe" 1
+    ensure_dep bun "bun — required runtime for command-guard, leak-guard, mcp-guard, statusline, and/or rtk-safe" 1
     # Warn ONCE per run (not once per hook below) when the bun about to be baked into
     # every selected hook's absolute path is the one npm installed alongside THIS
     # package (its own node_modules, or the hoisted ../../.bin one level up), not a
@@ -1342,7 +1342,7 @@ apply_additions() {
   # Placed whenever any consumer is selected, so bash and TS both resolve
   # config/hooks/lib/{secret-patterns.json,guard-core.js} relative to themselves.
   if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" \
-    || is_selected rtk-safe "$_sel_ids"; then
+    || is_selected mcp-guard "$_sel_ids" || is_selected rtk-safe "$_sel_ids"; then
     place_dir "$CONFIG_SRC/hooks/lib" "$config_dir/hooks"
   fi
 
@@ -1384,6 +1384,21 @@ apply_additions() {
     # Optional: stronger Bash secret detection (command-guard runs trufflehog on
     # outbound commands, like leak-guard does for web). Degrades to regex tiers without it.
     ensure_dep trufflehog "trufflehog (command-guard secret detection)" 0 || true
+  fi
+  if is_selected mcp-guard "$_sel_ids"; then
+    # bun is guaranteed present here — the hard-dependency gate above aborts the install
+    # if mcp-guard is selected without bun (a default-on security guard is never shipped
+    # silently disabled).
+    local bun_bin; bun_bin="$(command -v bun)"
+    place_file "$CONFIG_SRC/hooks/mcp-guard.ts" "$config_dir/hooks" +x
+    # Registered on every MCP tool. Overlaps leak-guard on mcp__searxng__* by design:
+    # leak-guard scans those as web egress, mcp-guard applies the server policy to them.
+    # Register with bun's ABSOLUTE path (same two-token quoted shape as command-guard/
+    # leak-guard): both tokens shq()-quoted so spaces/metachars/quotes don't split.
+    add="$(jq --arg cmd "$(shq "$bun_bin") $cqd/hooks/mcp-guard.ts" \
+      '.hooks.PreToolUse += [{matcher:"mcp__.*",hooks:[{type:"command",command:$cmd}]}]' <<<"$add")"
+    ok "mcp-guard enabled (bun: $bun_bin)"
+    ensure_dep trufflehog "trufflehog (mcp-guard secret detection)" 0 || true
   fi
   if is_selected rtk-safe "$_sel_ids"; then
     # bun is guaranteed present here — the hard-dependency gate above aborts the install
@@ -1486,21 +1501,24 @@ apply_additions() {
   # away — is false under -e, so we (re)place the template. The rm -f first clears that
   # broken link, otherwise `cp` would follow it to the missing target and abort the whole
   # install under set -e. A valid symlink to a real config is true under -e → left alone.
-  if { is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" || is_selected harness-pointer "$_sel_ids"; } \
+  if { is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" \
+       || is_selected mcp-guard "$_sel_ids" || is_selected harness-pointer "$_sel_ids"; } \
      && [ ! -e "$config_dir/aka-claude-tools.config" ]; then
     rm -f "$config_dir/aka-claude-tools.config"
     cp "$REPO_DIR/shared/aka-claude-tools.config.example" "$config_dir/aka-claude-tools.config"
     ok "Placed aka-claude-tools.config (opt-in, empty by default)"
   fi
-  # Compile the org-egress sidecar that BOTH egress guards read at runtime, so neither
-  # ever sources the shell config (a bun process can't safely evaluate arbitrary
-  # shell). Validated + atomically published. Whenever an egress guard is selected.
-  if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids"; then
+  # Compile the org-egress sidecar that every egress guard (leak-guard, command-guard,
+  # mcp-guard) reads at runtime, so none ever sources the shell config (a bun process
+  # can't safely evaluate arbitrary shell). Validated + atomically published. Whenever
+  # an egress guard is selected.
+  if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" \
+    || is_selected mcp-guard "$_sel_ids"; then
     compile_org_sidecar "$config_dir"
-    # mcp-guard doesn't exist in this kit yet — a later task adds it. Until then,
-    # mcp-policy.json rides along with the rest of the shared egress-guard libs
-    # (same gate, same cleanup below). Once mcp-guard lands, move this call under
-    # its own is_selected gate and hand its cleanup to mcp-guard's owned-paths list.
+  fi
+  # mcp-policy.json is owned by mcp-guard alone (the MCP server allow/deny lists), so
+  # it's compiled only when mcp-guard itself is selected.
+  if is_selected mcp-guard "$_sel_ids"; then
     compile_mcp_policy_sidecar "$config_dir"
   fi
   # trusted-bootstrap.json is owned by command-guard alone (it validates bootstrap
@@ -1638,18 +1656,17 @@ apply_additions() {
 
   # 4d-pre1a. The shared egress-guard libs (hooks/lib/secret-patterns.json and the
   # compiled hooks/lib/org-egress.json sidecar) are owned by NO single addition — they're
-  # placed/compiled whenever EITHER leak-guard or command-guard is selected. The
-  # per-addition deselect loop above can't remove them (neither guard's owned-paths list
-  # includes them), so deselecting BOTH guards would orphan them. Remove both only when
-  # NEITHER consumer remains. The vendored guard-core has a wider consumer set (every
-  # bun guard hook, including rtk-safe), so it's cleaned up separately below — only once
-  # NO consumer remains does the now-empty hooks/lib dir come down.
-  # mcp-policy.json rides along here too: mcp-guard doesn't exist yet, so for now it
-  # shares org-egress's ownership (same is_selected gate above). A later task hands
-  # its cleanup to mcp-guard's own owned-paths list and removes it from this loop.
-  if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids"; then
+  # placed/compiled whenever any egress guard (leak-guard, command-guard, mcp-guard) is
+  # selected. The per-addition deselect loop above can't remove them (no guard's
+  # owned-paths list includes them), so deselecting every guard would orphan them.
+  # Remove both only when NO egress guard remains. The vendored guard-core has a wider
+  # consumer set (every bun guard hook, including rtk-safe), so it's cleaned up
+  # separately below — only once NO consumer remains does the now-empty hooks/lib dir
+  # come down.
+  if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids" \
+    && ! is_selected mcp-guard "$_sel_ids"; then
     _egress_lib_removed=
-    for _lib in secret-patterns.json org-egress.json mcp-policy.json; do
+    for _lib in secret-patterns.json org-egress.json; do
       if [ -e "$config_dir/hooks/lib/$_lib" ]; then
         rm -f "$config_dir/hooks/lib/$_lib"
         _egress_lib_removed=1
@@ -1665,8 +1682,15 @@ apply_additions() {
     rm -f "$config_dir/hooks/lib/trusted-bootstrap.json"
     ok "Removed trusted-bootstrap sidecar (command-guard not selected)"
   fi
+  # mcp-policy.json is owned by mcp-guard alone (see the compile call site above) —
+  # remove it whenever mcp-guard itself is deselected, regardless of the other guards.
+  if ! is_selected mcp-guard "$_sel_ids" \
+    && [ -e "$config_dir/hooks/lib/mcp-policy.json" ]; then
+    rm -f "$config_dir/hooks/lib/mcp-policy.json"
+    ok "Removed MCP policy sidecar (mcp-guard not selected)"
+  fi
   if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids" \
-    && ! is_selected rtk-safe "$_sel_ids"; then
+    && ! is_selected mcp-guard "$_sel_ids" && ! is_selected rtk-safe "$_sel_ids"; then
     rm -f "$config_dir/hooks/lib/guard-core.js" "$config_dir/hooks/lib/guard-core.d.ts" \
       "$config_dir/hooks/lib/guard-core.lock.json"
     rmdir "$config_dir/hooks/lib" 2>/dev/null || true

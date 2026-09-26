@@ -63,7 +63,7 @@ brew install akasecurity/tap/aka-claude-tools
 aka-claude-tools
 ```
 
-The npm package brings its own `bun` as a dependency, so command-guard/leak-guard/statusline/rtk-safe
+The npm package brings its own `bun` as a dependency, so command-guard/leak-guard/mcp-guard/statusline/rtk-safe
 work even with no system `bun` on PATH. That bundled `bun` needs its postinstall script, which
 npm 12 blocks by default (`npm i -g` prints an install-scripts warning); allow it with
 `npm i -g --allow-scripts=bun @akasecurity/claude-tools`. When the bundled `bun` can't run, the
@@ -91,7 +91,7 @@ not a bare sandbox. Prefer a walkthrough? See the [safe-setup carousel](media/de
 
 ### Install as a Claude Code plugin (guards into your active profile)
 
-`claude plugin marketplace add akasecurity/marketplace` then `claude plugin install claude-tools@akasecurity` installs the guard hooks (command-guard, leak-guard) into your **active** profile.
+`claude plugin marketplace add akasecurity/marketplace` then `claude plugin install claude-tools@akasecurity` installs the guard hooks (command-guard, leak-guard, mcp-guard) into your **active** profile.
 
 - **Requires `bun`.** The guards run under bun. They **fail open** — if bun is missing they never
   block your work; instead you get one clear "guards INACTIVE" notice at session start. Install bun
@@ -129,6 +129,7 @@ Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.
 | `secure-settings` | Denies reads of SSH keys, cloud creds, `.env`, keychains; blocks writes to shell startup files; no auto-loaded MCP servers. | ● on |
 | `leak-guard` | Scans what the agent sends to the web and blocks anything shaped like a secret. Scanned locally, nothing uploaded to check it. | ● on |
 | `command-guard` | Blocks `curl…\|bash`, edits to your shell startup files, and credentials being shipped out. | ● on |
+| `mcp-guard` | Applies your MCP server allow/deny lists (`CT_MCP_ALLOW` / `CT_MCP_DENY`) and blocks MCP tool inputs carrying anything shaped like a secret. The plugin install scans only; the lists come with the full kit. | ● on |
 | `rtk-safe` | Compresses supported standalone commands, including `grep`/`rg` — native flags, exit codes and regex dialect are preserved, but long result sets are **summarised**: you get the first ~25 matches plus an exact count of what was hidden and a `rtk recall` handle to retrieve it. Requires stable [`rtk`](https://github.com/rtk-ai/rtk) ≥ 0.49.0; otherwise leaves commands unchanged. Leaves `head`, `-h`/`--help`, and anything with a shell operator or substitution untouched, and preserves project scripts and interpreter selection. `rg`'s auto-approval requires `command-guard`. | ● on |
 | `statusline` | A status bar with live context-fill and rate-limit gauges. | ● on |
 | `shell-audit` | On-demand, read-only scan of your shell startup for hardcoded creds, risky hooks, and stale aliases. | ● on |

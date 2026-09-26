@@ -6,6 +6,8 @@ import { tmpdir } from 'os';
 
 type Case = {
   id: string; hook: string; input?: unknown; raw?: string; env?: string; org?: Record<string, string>;
+  // env "mcp-policy": the hooks copy gets lib/mcp-policy.json built from this.
+  mcp?: { allow?: string[]; deny?: string[] };
   // Optional: for a case whose stderr embeds something incidental (e.g. a JS engine's
   // own TypeError text on an unexpected-error path) rather than a message this repo
   // owns, pin only a fixed prefix instead of the exact line. See --check below.
@@ -64,13 +66,18 @@ const pathTrufflehogHit = buildPathTrufflehogHit();
 
 function hooksDirFor(c: Case): { dir: string; cleanup: () => void } {
   const isOrgStale = c.id.endsWith('-org-stale');
-  if (c.env !== 'patterns-missing' && c.env !== 'org' && !isOrgStale) {
+  if (c.env !== 'patterns-missing' && c.env !== 'org' && c.env !== 'mcp-policy' && c.env !== 'core-missing' && !isOrgStale) {
     return { dir: join(root, 'config/hooks'), cleanup: () => {} };
   }
   const tmp = mkdtempSync(join(tmpdir(), 'golden-'));
   cpSync(join(root, 'config/hooks'), join(tmp, 'hooks'), { recursive: true });
   if (c.env === 'patterns-missing') rmSync(join(tmp, 'hooks/lib/secret-patterns.json'));
   if (c.env === 'org') writeFileSync(join(tmp, 'hooks/lib/org-egress.json'), JSON.stringify(c.org));
+  if (c.env === 'mcp-policy') {
+    writeFileSync(join(tmp, 'hooks/lib/mcp-policy.json'),
+      JSON.stringify({ allow: c.mcp?.allow ?? [], deny: c.mcp?.deny ?? [], sourceHash: '' }));
+  }
+  if (c.env === 'core-missing') rmSync(join(tmp, 'hooks/lib/guard-core.js'));
   if (isOrgStale) {
     // A sidecar whose sourceHash doesn't match the (freshly-written) config file, so
     // both guards' stale-config advisory fires alongside the org-marker block.
@@ -92,7 +99,8 @@ const out = cases.map((c) => {
     env: {
       ...process.env,
       PATH: c.env === 'trufflehog-hit' ? pathTrufflehogHit
-        : c.env === 'notrufflehog' || c.env === 'patterns-missing' || c.env === 'org' ? pathNoTruffle
+        : c.env === 'notrufflehog' || c.env === 'patterns-missing' || c.env === 'org'
+          || c.env === 'mcp-policy' || c.env === 'core-missing' ? pathNoTruffle
         : process.env.PATH,
     },
   });

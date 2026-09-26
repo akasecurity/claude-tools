@@ -92,6 +92,7 @@ don't specify one:
 - Which **additions** to layer on (read `config/additions.json` in this repo for
   the catalog + recommended defaults): secure base settings, leak-guard,
   command-guard (needs `bun`; also blocks writes to shell startup files),
+  mcp-guard (needs `bun`; MCP server allow/deny lists plus a secret scan of MCP inputs),
   rtk-safe (inert until stable `rtk` >= 0.49.0 is installed), responsive status line, shell-audit,
   the recommended nonessential-traffic toggles that don't touch Remote Control
   (error-reporting-off, feedback-off, feedback-survey-off), the opt-out `/wrap-up`
@@ -232,6 +233,8 @@ the user's go-ahead.
   command-guard); registers command-guard with bun's **absolute**
   path (`bun` is a **hard dependency**: selecting command-guard without `bun` aborts
   the install, exit non-zero, rather than soft-skipping a default-on security hook);
+  registers mcp-guard on `mcp__.*` the same way and compiles its `mcp-policy.json`
+  sidecar from `CT_MCP_ALLOW` / `CT_MCP_DENY`;
   merges the read-only `rtk-allowlist.json` for rtk-safe (never a
   blanket `Bash(rtk:*)`); copies the shell-audit
   skill and chmods its `audit.sh`; and seeds `aka-claude-tools.config` when a

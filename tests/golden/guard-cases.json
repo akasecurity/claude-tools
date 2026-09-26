@@ -34,5 +34,10 @@
   { "id": "lg-bad-json", "hook": "leak-guard", "raw": "{not json", "env": "notrufflehog" },
   { "id": "lg-unexpected-error", "hook": "leak-guard", "raw": "null", "env": "notrufflehog", "stderrPrefix": "warn (leak-guard): unexpected error — egress scan SKIPPED this call (surfaced, not silent). " },
   { "id": "rs-git-status", "hook": "rtk-safe", "input": {"tool_name":"Bash","tool_input":{"command":"git status"}}, "env": "notrufflehog" },
-  { "id": "rs-pipe", "hook": "rtk-safe", "input": {"tool_name":"Bash","tool_input":{"command":"ls | head"}}, "env": "notrufflehog" }
+  { "id": "rs-pipe", "hook": "rtk-safe", "input": {"tool_name":"Bash","tool_input":{"command":"ls | head"}}, "env": "notrufflehog" },
+  { "id": "mcp-cred", "hook": "mcp-guard", "input": {"tool_name":"mcp__github__create_issue","tool_input":{"title":"t","fields":{"nested":[{"body":"token ghp_0123456789abcdefghij0123456789ABCD"}]}}}, "env": "notrufflehog" },
+  { "id": "mcp-benign", "hook": "mcp-guard", "input": {"tool_name":"mcp__github__create_issue","tool_input":{"title":"fix typo","labels":["docs"]}}, "env": "notrufflehog" },
+  { "id": "mcp-denied", "hook": "mcp-guard", "input": {"tool_name":"mcp__bad__t","tool_input":{}}, "env": "mcp-policy", "mcp": {"deny":["bad"]} },
+  { "id": "mcp-not-allowed", "hook": "mcp-guard", "input": {"tool_name":"mcp__github__create_issue","tool_input":{"title":"x"}}, "env": "mcp-policy", "mcp": {"allow":["linear"]} },
+  { "id": "mcp-core-missing", "hook": "mcp-guard", "input": {"tool_name":"mcp__github__create_issue","tool_input":{"title":"x"}}, "env": "core-missing" }
 ]

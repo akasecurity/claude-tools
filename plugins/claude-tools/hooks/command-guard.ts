@@ -62,12 +62,12 @@ const BLOCK_MSG: Record<RuleId, (detail?: string) => string> = {
   'secret-detected': () => '🚨 BLOCKED (command-guard): outbound command contains a detected secret (trufflehog). Reference it via an environment variable instead of pasting the literal value.',
   'org-marker': () => '🚨 BLOCKED (command-guard): outbound command matches an internal identifier from aka-claude-tools.config (hostname, IP, path, or username). Describe it generically instead.',
   'credential-shape': (label) => `🚨 BLOCKED (command-guard): credential exfiltration — ${label} sent via an outbound tool.`,
-  // Not reachable via evaluateCommand (MCP-only rules from guard-core 0.3.0's
-  // evaluateMcpInput); kept here so the map stays total. mcp-guard (a future hook)
-  // owns these surfaces.
-  'mcp-server-denied': () => '🚨 BLOCKED (command-guard): command was rejected by a structural rule (mcp-server-denied).',
-  'mcp-server-not-allowed': () => '🚨 BLOCKED (command-guard): command was rejected by a structural rule (mcp-server-not-allowed).',
-  'mcp-input-unscannable': () => '🚨 BLOCKED (command-guard): command was rejected by a structural rule (mcp-input-unscannable).',
+  // Not reachable via evaluateBash (MCP-only rules from guard-core 0.3.0's
+  // evaluateMcpInput); kept here so the map stays total. mcp-guard owns
+  // these surfaces.
+  'mcp-server-denied': () => '🚨 BLOCKED (command-guard): command was rejected by an MCP server policy (mcp-server-denied).',
+  'mcp-server-not-allowed': () => '🚨 BLOCKED (command-guard): command was rejected by an MCP server policy (mcp-server-not-allowed).',
+  'mcp-input-unscannable': () => '🚨 BLOCKED (command-guard): command was rejected as an unscannable MCP input (mcp-input-unscannable).',
 };
 const NOTICE_MSG: Record<string, (m: string) => string | null> = {
   'scanner-unavailable': () => '⚠️ command-guard: trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).',

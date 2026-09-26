@@ -7,8 +7,8 @@ D=plugins/claude-tools
 # manifest present with correct name + version
 [[ "$(jq -r .name "$D/.claude-plugin/plugin.json")" == claude-tools ]] || { echo "FAIL name"; fails=1; }
 [[ "$(jq -r .version "$D/.claude-plugin/plugin.json")" == "$(cat VERSION)" ]] || { echo "FAIL version"; fails=1; }
-# the two guards + launcher + preflight are present
-for f in command-guard.ts leak-guard.ts bun-hook-launch.sh preflight.sh; do
+# the three guards + launcher + preflight are present
+for f in command-guard.ts leak-guard.ts mcp-guard.ts bun-hook-launch.sh preflight.sh; do
   [[ -f "$D/hooks/$f" ]] || { echo "FAIL missing $f"; fails=1; }
 done
 # rtk-safe is installer-only (needs a permissions allowlist a plugin can't apply) — must NOT ship
@@ -22,6 +22,11 @@ bashcount="$(jq -r '.hooks.PreToolUse[] | select(.matcher=="Bash")' "$D/hooks/ho
 # hooks.json: leak-guard registered on the web-egress matcher via the launcher
 leak="$(jq -r '.hooks.PreToolUse[] | select(.matcher=="WebSearch|WebFetch|mcp__searxng__") | .hooks[].command' "$D/hooks/hooks.json" | grep leak-guard || true)"
 [[ "$leak" == *'bun-hook-launch.sh'*'leak-guard.ts'* ]] || { echo "FAIL leak-guard registration: '$leak'"; fails=1; }
+# hooks.json: mcp-guard registered on every MCP tool via the launcher
+mcpg="$(jq -r '.hooks.PreToolUse[] | select(.matcher=="mcp__.*") | .hooks[].command' "$D/hooks/hooks.json" | grep mcp-guard || true)"
+[[ "$mcpg" == *'bun-hook-launch.sh'*'mcp-guard.ts'* ]] || { echo "FAIL mcp-guard registration: '$mcpg'"; fails=1; }
+# the plugin ships no compiled sidecars: mcp-guard runs there with no policy (scan only)
+[[ -e "$D/hooks/lib/mcp-policy.json" ]] && { echo "FAIL: mcp-policy.json must not ship in the plugin"; fails=1; }
 # preflight under SessionStart
 pf="$(jq -r '.hooks.SessionStart[].hooks[].command' "$D/hooks/hooks.json" | grep preflight || true)"
 [[ "$pf" == *'preflight.sh'* ]] || { echo "FAIL preflight registration"; fails=1; }

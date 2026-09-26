@@ -70,11 +70,11 @@ const BLOCK_MSG: Record<RuleId, string> = {
   'startup-write': 'egress blocked (leak-guard): query was rejected by a structural rule (startup-write).',
   'search-exec': 'egress blocked (leak-guard): query was rejected by a structural rule (search-exec).',
   // Not reachable via evaluateWebQuery either (MCP-only rules from guard-core 0.3.0's
-  // evaluateMcpInput); kept here so the map stays total. mcp-guard (a future hook)
-  // owns these surfaces.
-  'mcp-server-denied': 'egress blocked (leak-guard): query was rejected by a structural rule (mcp-server-denied).',
-  'mcp-server-not-allowed': 'egress blocked (leak-guard): query was rejected by a structural rule (mcp-server-not-allowed).',
-  'mcp-input-unscannable': 'egress blocked (leak-guard): query was rejected by a structural rule (mcp-input-unscannable).',
+  // evaluateMcpInput); kept here so the map stays total. mcp-guard owns
+  // these surfaces.
+  'mcp-server-denied': 'egress blocked (leak-guard): query was rejected by an MCP server policy (mcp-server-denied).',
+  'mcp-server-not-allowed': 'egress blocked (leak-guard): query was rejected by an MCP server policy (mcp-server-not-allowed).',
+  'mcp-input-unscannable': 'egress blocked (leak-guard): query was rejected as an unscannable MCP input (mcp-input-unscannable).',
 };
 const NOTICE_MSG: Record<string, string> = {
   'scanner-unavailable': 'warn (leak-guard): trufflehog not installed — secret detection degraded to regex tiers (org markers + shared key shapes).',
