@@ -75,15 +75,18 @@
 #                      Requires CT_ALIAS; implies non-interactive.
 #   --version, -V      Print the kit version (from the VERSION file) and exit. Runs
 #                      before any dependency check, so it works on a bare checkout.
-#   --audit-log        READ-ONLY: print the local security-event audit log (see
-#                      hooks/lib/audit.ts) for one profile — counts by kind and rule,
-#                      then the last 20 events (already redacted/capped by
-#                      formatAuditLine; nothing further is redacted here). Profile
-#                      resolution matches the other agent modes: CT_CONFIG_DIR when
-#                      set, else the default profile (~/.claude). Reads
-#                      <profile>/logs/security-<YYYY-MM>.jsonl; with no CT_AUDIT_MONTH
-#                      (or --month YYYY-MM), uses the current UTC month. Prints
-#                      "no security events recorded" when that file doesn't exist.
+#   --audit-log [--month YYYY-MM] [PROFILE_DIR]
+#                      READ-ONLY: print the local security-event audit log (see
+#                      hooks/lib/audit.ts) for one profile — a count of any
+#                      unparseable lines skipped, counts by kind and rule, then the
+#                      last 20 events RE-RENDERED through guard-core's
+#                      formatAuditLine (redacted/capped/allow-listed again on read,
+#                      not echoed verbatim). Profile resolution: PROFILE_DIR when
+#                      given, else CT_CONFIG_DIR, else the default profile
+#                      (~/.claude). Reads <profile>/logs/security-<YYYY-MM>.jsonl;
+#                      --month (or CT_AUDIT_MONTH) must be YYYY-MM or this aborts;
+#                      with neither, uses the current UTC month. Prints "no security
+#                      events recorded" when that file doesn't exist or is empty.
 #                      Never writes anything — the writer is lib/audit.ts, called
 #                      from the guard hooks, never from this script.
 
@@ -107,6 +110,11 @@ CT_DELETE_ALIAS=0
 CT_ENUMERATE=0
 CT_AUDIT_LOG_MODE=0
 CT_AUDIT_MONTH="${CT_AUDIT_MONTH:-}"
+# `--audit-log [--month YYYY-MM] [PROFILE_DIR]` also accepts an optional positional
+# profile path (an alternative to CT_CONFIG_DIR, which still works — see
+# audit_log_entry). Any arg that matches no known flag lands here; harmless for
+# every other mode, since only audit_log_entry ever reads it.
+CT_AUDIT_PROFILE_ARG=""
 # `--month YYYY-MM` takes a value; a plain `for arg in "$@"` can't peek the next
 # token, so track "the previous arg was --month" across iterations instead.
 _prev_flag=""
@@ -124,6 +132,7 @@ for arg in "$@"; do
     --enumerate)       CT_ENUMERATE=1; export CT_NONINTERACTIVE=1 ;;
     --audit-log)       CT_AUDIT_LOG_MODE=1; export CT_NONINTERACTIVE=1 ;;
     --month)           _prev_flag="--month" ;;
+    *)                 CT_AUDIT_PROFILE_ARG="$arg" ;;
   esac
 done
 
@@ -2245,14 +2254,29 @@ EOF
 
 # ── --audit-log entry: read-only summary of one profile's local security-event
 # audit log (hooks/lib/audit.ts writes it; this only ever reads). Profile
-# resolution mirrors the other agent modes: CT_CONFIG_DIR when set, else the
+# resolution: an explicit positional PROFILE_DIR wins, else CT_CONFIG_DIR, else the
 # default profile (~/.claude — same convention aitac_present's "no config_dir"
-# branch uses). CT_AUDIT_MONTH (or --month YYYY-MM) selects the month; the
-# current UTC month otherwise, matching audit.ts's own UTC month key.
+# branch uses). CT_AUDIT_MONTH (or --month YYYY-MM) selects the month, validated as
+# YYYY-MM; the current UTC month otherwise, matching audit.ts's own UTC month key.
+#
+# Parses defensively: a single malformed line must never take the whole read down
+# (jq's default behavior errors the ENTIRE invocation on one bad line — under this
+# script's `set -e`/pipefail that silently aborted the whole mode with a non-obvious
+# exit code). `fromjson? // empty` parses each line independently and drops one that
+# doesn't parse, so the rest still render; the count of dropped lines is reported.
+#
+# The "last 20 events" section is RE-RENDERED through guard-core's formatAuditLine
+# (shared/lib/render-audit-line.ts), not echoed verbatim from disk — a log file can
+# drift from what was originally written (a hand-edit, a stale format, a raw value
+# that slipped through some earlier bug), so redacting again on READ is a second,
+# independent safety net.
 audit_log_entry() {
-  local config_dir="${CT_CONFIG_DIR:-$HOME/.claude}"
+  local config_dir="${CT_AUDIT_PROFILE_ARG:-${CT_CONFIG_DIR:-$HOME/.claude}}"
   config_dir="${config_dir/#\~/$HOME}"
   local month="${CT_AUDIT_MONTH:-}"
+  if [ -n "$month" ] && ! [[ "$month" =~ ^[0-9]{4}-[0-9]{2}$ ]]; then
+    die "invalid --month value '$month' (expected YYYY-MM)"
+  fi
   [ -n "$month" ] || month="$(date -u +%Y-%m)"
   local file="$config_dir/logs/security-${month}.jsonl"
 
@@ -2261,18 +2285,34 @@ audit_log_entry() {
     return 0
   fi
 
+  local total_lines parsed parsed_count skipped
+  total_lines="$(wc -l < "$file" | tr -d ' ')"
+  # One valid, compact JSON line per parseable input line; a malformed line
+  # contributes nothing (never aborts the whole read).
+  parsed="$(jq -Rc 'fromjson? // empty' "$file" 2>/dev/null || true)"
+  parsed_count=0
+  [ -n "$parsed" ] && parsed_count="$(printf '%s\n' "$parsed" | grep -c '[^[:space:]]' || true)"
+  skipped=$(( total_lines > parsed_count ? total_lines - parsed_count : 0 ))
+
   say "${C_BOLD}Security audit log${C_RST} — ${config_dir} (${month})"
+  [ "$skipped" -gt 0 ] && say "${skipped} unparseable line(s) skipped"
   say ""
   say "by kind:"
-  jq -r '.kind // "(none)"' "$file" 2>/dev/null | sort | uniq -c | sort -rn \
+  printf '%s\n' "$parsed" | jq -r '.kind // "(none)"' 2>/dev/null | sort | uniq -c | sort -rn \
     | while read -r n k; do printf '  %5s  %s\n' "$n" "$k"; done
   say ""
   say "by rule:"
-  jq -r '.rule // "(none)"' "$file" 2>/dev/null | sort | uniq -c | sort -rn \
+  printf '%s\n' "$parsed" | jq -r '.rule // "(none)"' 2>/dev/null | sort | uniq -c | sort -rn \
     | while read -r n r; do printf '  %5s  %s\n' "$n" "$r"; done
   say ""
   say "last 20 event(s):"
-  tail -n 20 "$file"
+  # Prefer the PROFILE's own installed guard-core/patterns (the version that
+  # actually wrote this log); fall back to this repo's bundled copy.
+  local core="$config_dir/hooks/lib/guard-core.js"
+  [ -f "$core" ] || core="$CONFIG_SRC/hooks/lib/guard-core.js"
+  local pats="$config_dir/hooks/lib/secret-patterns.json"
+  [ -f "$pats" ] || pats="$CONFIG_SRC/hooks/lib/secret-patterns.json"
+  printf '%s\n' "$parsed" | tail -n 20 | bun "$REPO_DIR/shared/lib/render-audit-line.ts" "$core" "$pats"
 }
 
 # Run the installer only when EXECUTED, not when SOURCED. Sourcing the script (with

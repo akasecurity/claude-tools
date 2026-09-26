@@ -179,6 +179,18 @@ function profileRoots(): string[] {
   return [join(homedir(), '.claude')];
 }
 
+// True when THIS FILE is running from a Claude Code plugin install path
+// (…/plugins/cache/<marketplace>/<name>/<version>/hooks/…). Independent of
+// profileRoots(): CLAUDE_CONFIG_DIR is checked FIRST there, so a plugin copy
+// invoked inside a profile that ALSO has the full kit installed (a real
+// .aka-claude-tools-meta) would otherwise resolve to that real profile and
+// double-log every decision alongside that profile's own hooks. Audit logging is
+// disabled outright for a plugin install, never left to depend on whether the
+// active profile happens to carry a meta file.
+function isPluginInstall(): boolean {
+  return dirname(fileURLToPath(import.meta.url)).includes('/plugins/');
+}
+
 // guard-core missing, unreadable, incompatible or throwing: keep the structural blocks via
 // the raw regexes, fail closed on outbound-looking commands, allow the rest loudly.
 function coreUnavailable(command: string): never {
@@ -284,10 +296,11 @@ async function main(): Promise<void> {
     const alert = (d.notices as { level?: unknown; code?: unknown; message?: unknown }[])
       .find((n) => n && typeof n === 'object' && n.level === 'alert');
     const profileRoot = profileRoots()[0] ?? null;
+    const enabled = auditLog && !isPluginInstall();
     if (d.kind === 'block') {
       appendAudit(
         { hook: 'command-guard', tool: 'Bash', kind: 'block', rule: d.rule, snippet: command },
-        { profileRoot, enabled: auditLog, patterns },
+        { profileRoot, enabled, patterns },
       );
     } else if (alert) {
       appendAudit(
@@ -297,7 +310,7 @@ async function main(): Promise<void> {
           detail: typeof alert.message === 'string' ? alert.message : undefined,
           snippet: command,
         },
-        { profileRoot, enabled: auditLog, patterns },
+        { profileRoot, enabled, patterns },
       );
     }
   } catch { /* audit logging must never affect the decision */ }

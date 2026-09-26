@@ -73,6 +73,20 @@ function profileRoots(): string[] {
   return [join(homedir(), '.claude')];
 }
 
+// True when THIS FILE is running from a Claude Code plugin install path
+// (…/plugins/cache/<marketplace>/<name>/<version>/hooks/…). Independent of
+// profileRoots(): CLAUDE_CONFIG_DIR is checked FIRST there, so a plugin copy
+// invoked inside a profile that ALSO has the full kit installed (a real
+// .aka-claude-tools-meta) would otherwise resolve to that real profile and
+// double-log every decision alongside that profile's own hooks. Audit logging is
+// disabled outright for a plugin install, never left to depend on whether the
+// active profile happens to carry a meta file. (prompt-guard itself doesn't ship
+// in the plugin build today, but this keeps the four hooks' audit gating
+// identical and future-proofs it if that changes.)
+function isPluginInstall(): boolean {
+  return dirname(fileURLToPath(import.meta.url)).includes('/plugins/');
+}
+
 async function main(): Promise<void> {
   let parsed: unknown;
   try {
@@ -143,7 +157,7 @@ async function main(): Promise<void> {
           rule: typeof first?.code === 'string' ? first.code : undefined,
           detail: typeof first?.message === 'string' ? first.message : undefined,
         },
-        { profileRoot: profileRoots()[0] ?? null, enabled: auditLog, patterns },
+        { profileRoot: profileRoots()[0] ?? null, enabled: auditLog && !isPluginInstall(), patterns },
       );
     } catch { /* audit logging must never affect this hook's behavior */ }
   }

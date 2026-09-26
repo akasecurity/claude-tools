@@ -157,6 +157,18 @@ function profileRoots(): string[] {
   return [join(homedir(), '.claude')];
 }
 
+// True when THIS FILE is running from a Claude Code plugin install path
+// (…/plugins/cache/<marketplace>/<name>/<version>/hooks/…). Independent of
+// profileRoots(): CLAUDE_CONFIG_DIR is checked FIRST there, so a plugin copy
+// invoked inside a profile that ALSO has the full kit installed (a real
+// .aka-claude-tools-meta) would otherwise resolve to that real profile and
+// double-log every decision alongside that profile's own hooks. Audit logging is
+// disabled outright for a plugin install, never left to depend on whether the
+// active profile happens to carry a meta file.
+function isPluginInstall(): boolean {
+  return dirname(fileURLToPath(import.meta.url)).includes('/plugins/');
+}
+
 // guard-core missing, unreadable, incompatible, throwing or malformed: fail closed.
 function coreUnavailable(): never {
   console.error(CORE_MISSING_MSG);
@@ -237,33 +249,34 @@ async function main(): Promise<void> {
   // Local security-event audit log (opt-out via ai-tc's presence, see lib/audit.ts).
   // Best effort: loaded lazily so a broken audit.ts can never break the fail-closed
   // contract above, and wrapped so it never changes the decision or exit code.
-  // mcp-guard runs on every MCP call, so ANY of its own notices (not just
-  // alert-level ones — e.g. a stale/invalid org pattern) is audit-worthy, unlike
-  // command-guard/leak-guard where only an alert-level notice is.
+  // Only a LEVEL:'ALERT' notice is audit-worthy (same as command-guard/leak-guard) —
+  // mcp-guard's own operational warnings (org-stale, org-pattern-invalid) are
+  // guard-health notices, not security events, and are already surfaced on stderr.
   try {
     const { appendAudit } = await import('./lib/audit.ts');
-    const notice = (d.notices as { code?: unknown; message?: unknown }[])
-      .find((n) => n && typeof n === 'object');
+    const alert = (d.notices as { level?: unknown; code?: unknown; message?: unknown }[])
+      .find((n) => n && typeof n === 'object' && n.level === 'alert');
     // The tool input is redacted/capped by formatAuditLine same as any other
     // free-text field; JSON.stringify first so an object/array snippet reads as
     // a scannable string rather than "[object Object]".
     let snippet: string | undefined;
     try { snippet = JSON.stringify(input.tool_input); } catch { snippet = undefined; }
     const profileRoot = profileRoots()[0] ?? null;
+    const enabled = auditLog && !isPluginInstall();
     if (d.kind === 'block') {
       appendAudit(
         { hook: 'mcp-guard', tool, kind: 'block', rule: d.rule, snippet },
-        { profileRoot, enabled: auditLog, patterns },
+        { profileRoot, enabled, patterns },
       );
-    } else if (notice) {
+    } else if (alert) {
       appendAudit(
         {
           hook: 'mcp-guard', tool, kind: 'alert',
-          rule: typeof notice.code === 'string' ? notice.code : undefined,
-          detail: typeof notice.message === 'string' ? notice.message : undefined,
+          rule: typeof alert.code === 'string' ? alert.code : undefined,
+          detail: typeof alert.message === 'string' ? alert.message : undefined,
           snippet,
         },
-        { profileRoot, enabled: auditLog, patterns },
+        { profileRoot, enabled, patterns },
       );
     }
   } catch { /* audit logging must never affect the decision */ }
