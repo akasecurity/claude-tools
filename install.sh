@@ -1021,6 +1021,155 @@ compile_org_sidecar() {
   else ok "Compiled org-egress sidecar (no org patterns set — tier inactive)"; fi
 }
 
+# _mcp_server_name_to_json <key> <cfg> <name> — validate ONE MCP server name against
+# the portable identifier subset (^[A-Za-z0-9_-]+$) for compile_mcp_policy_sidecar.
+# die()s naming <key> (never a bare "invalid input") on anything else, including a
+# blank entry from a stray/leading/trailing comma. Prints the name back on success —
+# call sites build the JSON array with jq -R/-s so no shell-side quoting is needed.
+_mcp_server_name_to_json() {
+  local key="$1" cfg="$2" name="$3"
+  case "$name" in
+    ''|*[!A-Za-z0-9_-]*) die "$key in $cfg has an invalid server name \"$name\" (must match ^[A-Za-z0-9_-]+\$)." ;;
+  esac
+  printf '%s\n' "$name"
+}
+
+# compile_mcp_policy_sidecar <config_dir> — compile CT_MCP_ALLOW / CT_MCP_DENY (each a
+# comma-separated list of MCP server names) into hooks/lib/mcp-policy.json. mcp-guard
+# doesn't exist in this kit yet (a later task adds it); until then this sidecar is
+# placed and removed alongside the rest of the shared egress-guard libs — the same
+# is_selected gate as compile_org_sidecar, both at the call site and in cleanup.
+# Modeled exactly on compile_org_sidecar: subshell-source, validate, atomic publish.
+compile_mcp_policy_sidecar() {
+  local config_dir="$1"
+  local cfg="$config_dir/aka-claude-tools.config"
+  local sidecar="$config_dir/hooks/lib/mcp-policy.json"
+  [ -f "$cfg" ] || return 0
+  [ -d "$config_dir/hooks/lib" ] || return 0
+
+  # Source the config in a SUBSHELL (set +eu) exactly like compile_org_sidecar, and
+  # smuggle BOTH values out over one command substitution using \x1f (a byte that
+  # can never survive the name validation below, so it's a safe internal separator).
+  local raw="" _src_rc=0
+  raw="$( set +eu; . "$cfg" >/dev/null 2>&1; _rc=$?; printf '%s\x1f%s' "${CT_MCP_ALLOW:-}" "${CT_MCP_DENY:-}"; exit "$_rc" )" || _src_rc=$?
+  local allow_raw="${raw%%$'\x1f'*}" deny_raw="${raw#*$'\x1f'}"
+  if [ "$_src_rc" -ne 0 ] && { [ -n "$allow_raw" ] || [ -n "$deny_raw" ]; }; then
+    warn "aka-claude-tools.config sourced with an error (exit $_src_rc) while reading CT_MCP_ALLOW/CT_MCP_DENY — a value was set and compiled, but part of the config did not run. Review the config and re-run ./install.sh."
+  fi
+  case "$allow_raw" in *$'\n'*) die "CT_MCP_ALLOW in $cfg must be a single line (multiline values are rejected)." ;; esac
+  case "$deny_raw"  in *$'\n'*) die "CT_MCP_DENY in $cfg must be a single line (multiline values are rejected)." ;; esac
+
+  local allow_json="[]" deny_json="[]"
+  if [ -n "$allow_raw" ]; then
+    local IFS=,; set -f; local -a _names=($allow_raw); set +f; unset IFS
+    local n; local -a _out=()
+    for n in "${_names[@]}"; do _out+=("$(_mcp_server_name_to_json "CT_MCP_ALLOW" "$cfg" "$n")"); done
+    allow_json="$(printf '%s\n' "${_out[@]}" | jq -R . | jq -s -c .)"
+  fi
+  if [ -n "$deny_raw" ]; then
+    local IFS=,; set -f; local -a _names=($deny_raw); set +f; unset IFS
+    local n; local -a _out=()
+    for n in "${_names[@]}"; do _out+=("$(_mcp_server_name_to_json "CT_MCP_DENY" "$cfg" "$n")"); done
+    deny_json="$(printf '%s\n' "${_out[@]}" | jq -R . | jq -s -c .)"
+  fi
+
+  # sourceHash: same portable sha256-over-raw-bytes as compile_org_sidecar, so
+  # mcp-guard can re-derive it with bun's createHash over the identical bytes.
+  local hash=""
+  hash="$(sha256_file "$cfg" 2>/dev/null || true)"
+
+  local tmp="$sidecar.tmp.$$"
+  jq -n --argjson a "$allow_json" --argjson d "$deny_json" --arg h "$hash" \
+    '{allow:$a, deny:$d, sourceHash:$h}' > "$tmp" && mv -f "$tmp" "$sidecar"
+  if [ -n "$allow_raw$deny_raw" ]; then ok "Compiled MCP policy sidecar (CT_MCP_ALLOW/CT_MCP_DENY active)";
+  else ok "Compiled MCP policy sidecar (no MCP policy set — inactive)"; fi
+}
+
+# _bootstrap_url_to_rule <key> <cfg> <url> — validate ONE trusted-bootstrap URL for
+# compile_bootstrap_sidecar and print back "<lowercased-host>\t<path>" on success.
+# die()s naming <key>, never a bare "invalid input", on any violation:
+#   - must be https://, with a non-empty host and a path
+#   - path must end in / (a prefix, not a specific file)
+#   - no userinfo (@) and no port (:) in the authority
+#   - none of ?#{}[]\ or any whitespace anywhere in the URL
+#   - host limited to the portable hostname subset ([A-Za-z0-9.-]+), lowercased for
+#     the sidecar since hostnames are case-insensitive
+_bootstrap_url_to_rule() {
+  local key="$1" cfg="$2" url="$3"
+  case "$url" in
+    *[\?\#\{\}\[\]\\]*|*[[:space:]]*)
+      die "$key in $cfg has an invalid URL \"$url\" (must not contain ?, #, {, }, [, ], \\, or whitespace)." ;;
+  esac
+  case "$url" in
+    https://?*) ;;
+    *) die "$key in $cfg has an invalid URL \"$url\" (must start with https:// and name a host)." ;;
+  esac
+  local rest="${url#https://}"
+  case "$rest" in
+    */*) ;;
+    *) die "$key in $cfg has an invalid URL \"$url\" (missing a path — must end in /)." ;;
+  esac
+  case "$url" in
+    */) ;;
+    *) die "$key in $cfg has an invalid URL \"$url\" (path must end in /)." ;;
+  esac
+  local authority="${rest%%/*}" path="/${rest#*/}"
+  case "$authority" in
+    *@*) die "$key in $cfg has an invalid URL \"$url\" (userinfo (@) in the host is not allowed)." ;;
+  esac
+  case "$authority" in
+    *:*) die "$key in $cfg has an invalid URL \"$url\" (a port in the host is not allowed)." ;;
+  esac
+  case "$authority" in
+    ''|*[!A-Za-z0-9.-]*) die "$key in $cfg has an invalid URL \"$url\" (host has invalid characters)." ;;
+  esac
+  local host_lc
+  host_lc="$(printf '%s' "$authority" | tr 'A-Z' 'a-z')"
+  printf '%s\t%s' "$host_lc" "$path"
+}
+
+# compile_bootstrap_sidecar <config_dir> — compile CT_TRUSTED_BOOTSTRAP_URLS (a
+# space-separated allowlist of installer-script URLs) into
+# hooks/lib/trusted-bootstrap.json, the sidecar command-guard reads at runtime.
+# Modeled exactly on compile_org_sidecar: subshell-source, validate, atomic publish.
+# Owned by command-guard alone (unlike the shared egress libs above) — placed and
+# removed with command-guard specifically; see the call site and cleanup below.
+compile_bootstrap_sidecar() {
+  local config_dir="$1"
+  local cfg="$config_dir/aka-claude-tools.config"
+  local sidecar="$config_dir/hooks/lib/trusted-bootstrap.json"
+  [ -f "$cfg" ] || return 0
+  [ -d "$config_dir/hooks/lib" ] || return 0
+
+  local raw="" _src_rc=0
+  raw="$( set +eu; . "$cfg" >/dev/null 2>&1; _rc=$?; printf '%s' "${CT_TRUSTED_BOOTSTRAP_URLS:-}"; exit "$_rc" )" || _src_rc=$?
+  if [ "$_src_rc" -ne 0 ] && [ -n "$raw" ]; then
+    warn "aka-claude-tools.config sourced with an error (exit $_src_rc) while reading CT_TRUSTED_BOOTSTRAP_URLS — a value was set and compiled, but part of the config did not run. Review the config and re-run ./install.sh."
+  fi
+  case "$raw" in *$'\n'*) die "CT_TRUSTED_BOOTSTRAP_URLS in $cfg must be a single line (multiline values are rejected)." ;; esac
+
+  local rules_json="[]"
+  if [ -n "$raw" ]; then
+    set -f; local -a _urls=($raw); set +f   # default IFS: space/tab; no globbing
+    local u pair host path
+    local -a _entries=()
+    for u in "${_urls[@]}"; do
+      pair="$(_bootstrap_url_to_rule "CT_TRUSTED_BOOTSTRAP_URLS" "$cfg" "$u")"
+      host="${pair%%$'\t'*}"; path="${pair#*$'\t'}"
+      _entries+=("$(jq -nc --arg h "$host" --arg p "$path" '{host:$h, pathPrefix:$p}')")
+    done
+    [ "${#_entries[@]}" -gt 0 ] && rules_json="$(printf '%s\n' "${_entries[@]}" | jq -s -c .)"
+  fi
+
+  local hash=""
+  hash="$(sha256_file "$cfg" 2>/dev/null || true)"
+
+  local tmp="$sidecar.tmp.$$"
+  jq -n --argjson r "$rules_json" --arg h "$hash" '{rules:$r, sourceHash:$h}' > "$tmp" && mv -f "$tmp" "$sidecar"
+  if [ -n "$raw" ]; then ok "Compiled trusted-bootstrap sidecar (CT_TRUSTED_BOOTSTRAP_URLS active)";
+  else ok "Compiled trusted-bootstrap sidecar (no trusted bootstrap URLs set — inactive)"; fi
+}
+
 # meta_set <config_dir> <key> <value>  — upsert key=value into
 # <config_dir>/.aka-claude-tools-meta, creating the file if absent and preserving
 # any other key lines. This file MARKS a profile as aka-claude-tools-managed
@@ -1321,6 +1470,17 @@ apply_additions() {
   # shell). Validated + atomically published. Whenever an egress guard is selected.
   if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids"; then
     compile_org_sidecar "$config_dir"
+    # mcp-guard doesn't exist in this kit yet — a later task adds it. Until then,
+    # mcp-policy.json rides along with the rest of the shared egress-guard libs
+    # (same gate, same cleanup below). Once mcp-guard lands, move this call under
+    # its own is_selected gate and hand its cleanup to mcp-guard's owned-paths list.
+    compile_mcp_policy_sidecar "$config_dir"
+  fi
+  # trusted-bootstrap.json is owned by command-guard alone (it validates bootstrap
+  # script URLs before letting a curl|sh-style command through), so it's compiled
+  # only when command-guard itself is selected — not on a leak-guard-only install.
+  if is_selected command-guard "$_sel_ids"; then
+    compile_bootstrap_sidecar "$config_dir"
   fi
 
   # 4d. merge settings (existing-in-dir ∪ additions) and write
@@ -1457,15 +1617,26 @@ apply_additions() {
   # NEITHER consumer remains. The vendored guard-core has a wider consumer set (every
   # bun guard hook, including rtk-safe), so it's cleaned up separately below — only once
   # NO consumer remains does the now-empty hooks/lib dir come down.
+  # mcp-policy.json rides along here too: mcp-guard doesn't exist yet, so for now it
+  # shares org-egress's ownership (same is_selected gate above). A later task hands
+  # its cleanup to mcp-guard's own owned-paths list and removes it from this loop.
   if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids"; then
     _egress_lib_removed=
-    for _lib in secret-patterns.json org-egress.json; do
+    for _lib in secret-patterns.json org-egress.json mcp-policy.json; do
       if [ -e "$config_dir/hooks/lib/$_lib" ]; then
         rm -f "$config_dir/hooks/lib/$_lib"
         _egress_lib_removed=1
       fi
     done
     [ -n "$_egress_lib_removed" ] && ok "Removed shared egress-guard lib (no guard selected)"
+  fi
+  # trusted-bootstrap.json is owned by command-guard alone (see the compile call
+  # site above) — remove it whenever command-guard itself is deselected, regardless
+  # of leak-guard's state.
+  if ! is_selected command-guard "$_sel_ids" \
+    && [ -e "$config_dir/hooks/lib/trusted-bootstrap.json" ]; then
+    rm -f "$config_dir/hooks/lib/trusted-bootstrap.json"
+    ok "Removed trusted-bootstrap sidecar (command-guard not selected)"
   fi
   if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids" \
     && ! is_selected rtk-safe "$_sel_ids"; then
