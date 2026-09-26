@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Review Focus: ai-tc runtime coexistence, on the real hooks.
+# ai-tc runtime coexistence, on the real hooks.
 #
 # Cases 1-3 (ai-tc enabled in the profile across both guards' tool surfaces; ai-tc cached but
 # not registered/not explicitly enabled) are already pinned by test_scn_aitc_deferral_scope.sh
-# (Tasks 4/5) — this file does not repeat them. What's new here is the PROFILE RESOLUTION
-# itself (Task 1's contract that explicit CLAUDE_CONFIG_DIR roots REPLACE the default, never
-# add to it):
+# — this file does not repeat them. What's new here is the PROFILE RESOLUTION itself (the
+# contract that explicit CLAUDE_CONFIG_DIR roots REPLACE the default, never add to it):
 #
 #   4. ai-tc enabled only in a different profile ($HOME/.claude) while the hook runs from
 #      profile P with CLAUDE_CONFIG_DIR=P (which has no ai-tc) — must NOT defer. Hard

@@ -43,7 +43,7 @@ PATH_CLEAN="$(build_path_no_trufflehog)"
 # A sandbox copy of the real hooks — never run against the repo's own config/hooks.
 hooks="$tmp/hooks"; cp -R config/hooks "$hooks"
 
-# Two sandbox profiles: bare (no ai-tc) and ai-tc stubbed in per Task 6's shape.
+# Two sandbox profiles: bare (no ai-tc) and ai-tc stubbed in (registry + enabled + cache dir).
 bare="$tmp/bare"; mkdir -p "$bare"
 aitc="$tmp/aitc"; mkdir -p "$aitc/plugins/cache/akasecurity/ai-tc/1"
 printf '%s' '{"plugins":{"ai-tc@akasecurity":[{}]}}' > "$aitc/plugins/installed_plugins.json"

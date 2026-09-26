@@ -830,8 +830,8 @@ setup_alias() {
 # the commands to run. Under --defaults the confirm takes its default (yes) without
 # blocking. Silent when ai-tc is already present, so a re-run does not nag.
 # aitc_present [config_dir] — ai-tc installed AND enabled, per guard-core's detectAitc
-# (one detection rule shared by the installer here and the hooks' run-time deferral,
-# Tasks 4-6). With a config dir, checks that one profile (used by the statusline
+# (one detection rule shared by the installer here and the hooks' run-time deferral
+# in command-guard, leak-guard and rtk-safe). With a config dir, checks that one profile (used by the statusline
 # skip and the stash guard, which must agree on the SAME profile being installed).
 # Without one, checks the default profile and every ~/.claude-* profile (used by
 # offer_aitc, which is a global "don't nag" check, not tied to one target dir).

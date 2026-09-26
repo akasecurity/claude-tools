@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Scenario — install-time ai-tc detection (Task 7).
+# Scenario — install-time ai-tc detection.
 #
 # The installer's statusline build step and offer_aitc must agree with the hooks
-# (Tasks 4-6) on ONE detection rule: guard-core's detectAitc, via the
+# (command-guard, leak-guard, rtk-safe) on ONE detection rule: guard-core's detectAitc, via the
 # shared/lib/aitc-status.ts wrapper. When ai-tc is registered + enabled + cached
 # for the target profile, the kit skips installing its OWN statusline (ai-tc
 # provides one) and the ai-tc offer stays silent (nothing to offer).
@@ -43,7 +43,7 @@ INSTALL="$REPO_ROOT/install.sh"
 # under test.
 SEL="secure-settings leak-guard statusline"
 
-stub_aitc() { # <profile-dir> — registry + enabled + cache dir, matches Task 6's shape.
+stub_aitc() { # <profile-dir> — registry + enabled + cache dir, the shape the hook tests use.
               # OVERWRITES settings.json — only safe to call before the profile has one.
   mkdir -p "$1/plugins/cache/akasecurity/ai-tc/1"
   printf '%s' '{"plugins":{"ai-tc@akasecurity":[{}]}}' > "$1/plugins/installed_plugins.json"

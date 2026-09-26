@@ -1,7 +1,7 @@
 // Installer helper: is ai-tc installed and enabled for this profile? Prints "present" | "absent".
 // Thin wrapper around the vendored guard-core's detectAitc, so the installer's ai-tc
 // detection (statusline skip, offer suppression) and the hooks' run-time deferral
-// (Tasks 4-6) share the exact same rule. Usage errors exit 1; a false/undetected
+// (command-guard, leak-guard, rtk-safe) share the exact same rule. Usage errors exit 1; a false/undetected
 // result is a normal "absent" print with exit 0 (aitc_present in install.sh treats a
 // non-"present" output, including a thrown/failed import, as absent — the safe
 // default: the kit installs its statusline and shows the offer).
