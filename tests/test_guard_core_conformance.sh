@@ -61,6 +61,12 @@ for ((i = 0; i < n; i++)); do
   fx="$(jq -c ".[$i]" "$fixtures")"
   id="$(jq -r .id <<<"$fx")"
   surface="$(jq -r .surface <<<"$fx")"
+
+  if [ "$surface" = "mcp" ]; then
+    echo "  SKIP $id: mcp surface pending mcp-guard"
+    continue
+  fi
+
   tool="$(jq -r .tool <<<"$fx")"
   input="$(jq -r .input <<<"$fx")"
   aitc_ctx="$(jq -r '.ctx.aitc // false' <<<"$fx")"

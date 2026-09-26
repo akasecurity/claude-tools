@@ -1,7 +1,7 @@
 {
-  "version": "0.2.2",
-  "sha256": "25e2e494316d98dbab94178fd3ce0a22de9ab8d26e16d20cee359bdf073e5368",
-  "dtsSha256": "a43f30eedec0984912c521f295cb9dc0c2e7462f74e812a723785da299042050",
-  "source": "6a8fcefc8c15cf276a6c7d4c8415442e7d51b50e",
-  "fixturesSha256": "4b581713a4fe67dcb3d95e62b57840f2e615727e52f8fc4a26fc1bf50f805d18"
+  "version": "0.3.0",
+  "sha256": "ca37014fc4ab9f8fac2c44dade834b9a45711f24098548cb1fb5b5f6265c10ac",
+  "dtsSha256": "2c097ae386172d1b2c6f99bd0be60ef112968a2d4b99cb2b541c6ca5534ac379",
+  "source": "f74c652ae141e1bfaf16f48955432f6d02196878",
+  "fixturesSha256": "baef7ed34bcad2b4c597b9d754bce5418c1cbd929da2b36a33f13ac3deba323b"
 }
