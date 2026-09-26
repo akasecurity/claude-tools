@@ -31,7 +31,7 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   model's context. Narrows to the injection-marker check alone when ai-tc is installed and
   covers prompt content for the profile.
 - **`sandbox`**: a new opt-in addition that sets `sandbox.enabled`, turning on Claude Code's
-  native OS-level sandbox (`sandbox-exec` on macOS, `bwrap` on Linux) so Bash and every other
+  native OS-level sandbox (`sandbox-exec` on macOS, `bwrap` plus `socat` on Linux) so Bash and every other
   tool run confined at the OS level, not just the Read tool's own deny rules. Deliberately
   does not also write `sandbox.filesystem.denyRead` — Claude Code's own sandbox already
   merges `secure-settings`'s `Read(...)` credential-deny rules into its effective filesystem

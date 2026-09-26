@@ -28,7 +28,7 @@
 #      addition like any other kit-managed setting — a manually-edited `false` on a
 #      re-apply (still selected) is set back to `true`, but never SILENTLY: a warn line
 #      names the value it overwrote and how to actually turn the sandbox off.
-#   6. Linux with no `bwrap` on PATH → skipped with the documented notice, install
+#   6. Linux with neither `bwrap` nor `socat` on PATH → skipped with the documented notice, install
 #      still exits 0 (soft-skip: opt-in addition, not a fatal dependency).
 #   7. idempotent re-run (select twice in a row) produces semantically unchanged
 #      settings, and does NOT corrupt the stash (a second select must not re-stash the
@@ -196,8 +196,8 @@ install_into "$SB3" "$PROFILE3" "sandbox" "CT_UNAME=Linux" "PATH=$STUBBIN" \
   >"$SB3/skip.log" 2>&1
 rc=$?
 assert_eq "linux-no-bwrap: install still exits 0 (soft-skip, not a hard failure)" "0" "$rc"
-assert_lit "linux-no-bwrap: prints the documented notice" \
-  "sandbox: bubblewrap (bwrap) not found; sandbox addition skipped." "$SB3/skip.log"
+assert_lit "linux-no-bwrap: prints the documented notice, naming both missing tools" \
+  "sandbox: bubblewrap (bwrap) and socat not found; sandbox addition skipped." "$SB3/skip.log"
 S3="$PROFILE3/settings.json"
 if [ -f "$S3" ]; then
   assert_nlit "linux-no-bwrap: no sandbox key was written" '"sandbox"' "$S3"
@@ -297,5 +297,36 @@ assert_install_ok "reselect: second deselect exits 0" "$SB10/d2.log" "$?"
 jq -e '.sandbox.enabled == false and (has("_aka_prior_sandbox_enabled")|not)' "$S10" >/dev/null 2>&1 \
   && pass "reselect: second deselect restores false and drops the stash" \
   || fail "reselect: second deselect restores false and drops the stash" "got: $(jq -c '.' "$S10" 2>/dev/null)"
+
+# ── 11. Linux needs socat as well as bwrap; each missing tool is named ───────────
+STUBS11="$(sandbox)/stubs"; mkdir -p "$STUBS11/bw" "$STUBS11/so"
+printf '#!/bin/sh\nexit 0\n' > "$STUBS11/bw/bwrap"; chmod +x "$STUBS11/bw/bwrap"
+printf '#!/bin/sh\nexit 0\n' > "$STUBS11/so/socat"; chmod +x "$STUBS11/so/socat"
+SB11="$(sandbox)"; PROFILE11="$SB11/profile"
+install_into "$SB11" "$PROFILE11" "sandbox" "CT_UNAME=Linux" "PATH=$STUBS11/bw:$STUBBIN" >"$SB11/log" 2>&1
+assert_eq "linux-no-socat: install still exits 0" "0" "$?"
+assert_lit "linux-no-socat: names socat alone" \
+  "sandbox: socat not found; sandbox addition skipped." "$SB11/log"
+if [ -f "$PROFILE11/settings.json" ]; then assert_nlit "linux-no-socat: no sandbox key written" '"sandbox"' "$PROFILE11/settings.json"; else pass "linux-no-socat: no sandbox key written (no settings.json at all)"; fi
+SB12="$(sandbox)"; PROFILE12="$SB12/profile"
+install_into "$SB12" "$PROFILE12" "sandbox" "CT_UNAME=Linux" "PATH=$STUBS11/so:$STUBBIN" >"$SB12/log" 2>&1
+assert_eq "linux-socat-only: install still exits 0" "0" "$?"
+assert_lit "linux-socat-only: names bwrap alone" \
+  "sandbox: bubblewrap (bwrap) not found; sandbox addition skipped." "$SB12/log"
+SB13="$(sandbox)"; PROFILE13="$SB13/profile"
+install_into "$SB13" "$PROFILE13" "sandbox" "CT_UNAME=Linux" "PATH=$STUBS11/bw:$STUBS11/so:$STUBBIN" >"$SB13/log" 2>&1
+assert_eq "linux-both: install exits 0" "0" "$?"
+jq -e '.sandbox.enabled == true' "$PROFILE13/settings.json" >/dev/null 2>&1 \
+  && pass "linux-both: sandbox.enabled set when bwrap and socat are both present" \
+  || fail "linux-both: sandbox.enabled set" "got: $(jq -c '.sandbox // "MISSING"' "$PROFILE13/settings.json" 2>/dev/null)"
+
+# ── 12. any other OS gets its own notice, not a bubblewrap one ───────────────────
+SB14="$(sandbox)"; PROFILE14="$SB14/profile"
+install_into "$SB14" "$PROFILE14" "sandbox" "CT_UNAME=FreeBSD" >"$SB14/log" 2>&1
+assert_eq "unsupported-os: install still exits 0" "0" "$?"
+assert_lit "unsupported-os: names the OS" \
+  "sandbox: unsupported OS (FreeBSD); sandbox addition skipped." "$SB14/log"
+assert_nlit "unsupported-os: no bubblewrap message" "bubblewrap" "$SB14/log"
+if [ -f "$PROFILE14/settings.json" ]; then assert_nlit "unsupported-os: no sandbox key written" '"sandbox"' "$PROFILE14/settings.json"; else pass "unsupported-os: no sandbox key written (no settings.json at all)"; fi
 
 t_summary

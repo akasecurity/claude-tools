@@ -1414,8 +1414,10 @@ apply_additions() {
   # to Claude Code's own merge gets the credential protection with the semantics that
   # actually work for those three glob rules.
   # Platform-gated: sandbox-exec ships with macOS (always supported); the Linux
-  # backend needs `bwrap` on PATH. CT_UNAME lets tests force the OS check without
-  # faking `uname` on PATH. Any other OS, or Linux without bwrap, skips with a notice
+  # backend needs both `bwrap` (bubblewrap) and `socat` (its network proxy) on PATH —
+  # Claude Code reports "sandbox is enabled but dependencies are missing" and names
+  # either one when absent. CT_UNAME lets tests force the OS check without faking
+  # `uname` on PATH. Any other OS, or Linux missing either tool, skips with a notice
   # (soft-skip, never die — this addition is opt-in, so an unsupported host just
   # doesn't get it rather than aborting the whole install). `_sb_supported` is read
   # again later (after `existing` is loaded) by the stash/restore reconcile step, so it's
@@ -1423,14 +1425,20 @@ apply_additions() {
   local _sb_supported=0
   if is_selected sandbox "$_sel_ids"; then
     local _sb_os; _sb_os="${CT_UNAME:-$(uname -s)}"
+    local _sb_missing=""
     case "$_sb_os" in
       Darwin) _sb_supported=1 ;;
-      Linux)  command -v bwrap >/dev/null 2>&1 && _sb_supported=1 ;;
+      Linux)
+        command -v bwrap >/dev/null 2>&1 || _sb_missing="bubblewrap (bwrap)"
+        command -v socat >/dev/null 2>&1 || _sb_missing="${_sb_missing:+$_sb_missing and }socat"
+        [ -z "$_sb_missing" ] && _sb_supported=1 ;;
     esac
     if [ "$_sb_supported" = "1" ]; then
       add="$(jq -s '.[0] * .[1]' <(printf '%s' "$add") "$CONFIG_SRC/settings.sandbox.json")"
+    elif [ -n "$_sb_missing" ]; then
+      warn "sandbox: ${_sb_missing} not found; sandbox addition skipped."
     else
-      warn "sandbox: bubblewrap (bwrap) not found; sandbox addition skipped."
+      warn "sandbox: unsupported OS (${_sb_os}); sandbox addition skipped."
     fi
   fi
 

@@ -104,7 +104,7 @@ don't specify one:
   addition (changes Bash behaviour in every session: enables Claude Code's native
   OS-level sandbox, which already merges secure-settings's credential Read-denies into
   its own filesystem restrictions at runtime — this addition doesn't duplicate that
-  list; needs `bwrap` on PATH on Linux, always available on macOS). Additions with a
+  list; needs `bwrap` and `socat` on PATH on Linux, always available on macOS). Additions with a
   `skill` field are **directory copies**: copy the whole directory into
   `<dir>/skills/` (replace any existing copy so re-installs don't leave stale
   files). Additions with a `workflow` field are **file copies** into

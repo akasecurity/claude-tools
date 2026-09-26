@@ -39,14 +39,14 @@ jobs:
         # search-contract tests in tests/rtk-safe-behavior.test.ts exercise directly.
         # ubuntu-latest does not ship ripgrep by default.
         run: sudo apt-get update -y && sudo apt-get install -y ripgrep
-      - name: Install bubblewrap (bwrap)
-        # The opt-in `sandbox` addition requires bwrap on PATH on Linux (soft-skipped,
+      - name: Install bubblewrap (bwrap) and socat
+        # The opt-in `sandbox` addition requires bwrap and socat on PATH on Linux (soft-skipped,
         # with a notice, when it's absent — see settings.sandbox.json / test_scn_sandbox.sh).
         # Without it here, every "normal" sandbox scenario in that test soft-skips instead
         # of exercising the real enable/stash/ownership behavior, and only the explicit
         # linux-no-bwrap scenario (which hides bwrap on purpose) would ever pass.
-        # ubuntu-latest does not ship bubblewrap by default.
-        run: sudo apt-get update -y && sudo apt-get install -y bubblewrap
+        # ubuntu-latest does not ship bubblewrap or socat by default.
+        run: sudo apt-get update -y && sudo apt-get install -y bubblewrap socat
       - name: tool versions
         run: |
           bash --version | head -1
