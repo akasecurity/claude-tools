@@ -17,7 +17,7 @@ PROFILE="$SB/.claude-aka"              # non-default config dir (default is ~/.c
 # so the smoke is stable in CI: a hook (leak-guard), a command (wrap-up), a skill
 # (shell-audit), a statusLine (statusline), and base settings (secure-settings).
 SEL="secure-settings leak-guard wrap-up shell-audit statusline"
-# Hermetic PATH (install_path): an operator's real `aka-claude` PATH command must
+# Hermetic PATH (install_path): an operator's real `claude-aka` PATH command must
 # not turn this into a conflict-rename.
 IPATH="$(install_path)"
 run() { PATH="$IPATH" CT_ADDITIONS="$1" SHELL=/bin/bash HOME="$SB" bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$SB/log" 2>&1; }
@@ -50,7 +50,7 @@ assert_ok   "no \$comment keys in deployed settings" \
 
 # Alias block written to the sandbox shell rc, pointing at THIS profile.
 assert_lit  "managed alias block opener in rc" \
-  ">>> aka-claude-tools managed: aka-claude" "$RC"
+  ">>> aka-claude-tools managed: claude-aka" "$RC"
 assert_lit  "alias points CLAUDE_CONFIG_DIR at this profile" \
   "CLAUDE_CONFIG_DIR=\"$PROFILE\"" "$RC"
 

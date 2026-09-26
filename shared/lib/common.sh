@@ -153,15 +153,25 @@ ensure_brew() {
 }
 
 # ensure_dep <tool> <label> <required:0|1>
-# If <tool> is missing, offer to install it via the detected package manager
+# If <tool> is missing (or, for bun, present but not runnable), offer to install it via the detected package manager
 # (offering to install Homebrew first if there's no package manager at all).
 # Returns 0 if present/installed, 1 otherwise. Dies if required.
 # Non-interactive runs NEVER install anything: install commands may need sudo
 # (would hang with no TTY) or run a vendor installer script — both require a
 # human consenting at a prompt. We warn (or die, if required) instead.
+# dep_usable <tool> — 0 when <tool> resolves on PATH and, for bun, actually runs.
+# A bun that resolves but can't run (npm's blocked-postinstall placeholder passes -x
+# and exits 1) counts as absent: hooks registered on it exit 1, not 2, so a guard
+# wired to it would never block.
+dep_usable() {
+  command -v "$1" >/dev/null 2>&1 || return 1
+  if [ "$1" = bun ]; then bun --version >/dev/null 2>&1 || return 1; fi
+  return 0
+}
+
 ensure_dep() {
   local tool="$1" label="${2:-$1}" required="${3:-0}" cmd
-  command -v "$tool" >/dev/null 2>&1 && return 0
+  dep_usable "$tool" && return 0
   cmd="$(pm_install_cmd "$tool")"
   if [ "${CT_NONINTERACTIVE:-0}" = "1" ]; then
     if [ "$required" = "1" ]; then
@@ -175,7 +185,7 @@ ensure_dep() {
   if [ -n "$cmd" ]; then
     if confirm "  • ${label} not found — install via: ${cmd} ?" "Y"; then
       info "installing ${tool}…"
-      if eval "$cmd" && command -v "$tool" >/dev/null 2>&1; then ok "${tool} installed."; return 0; fi
+      if eval "$cmd" && { hash -r; dep_usable "$tool"; }; then ok "${tool} installed."; return 0; fi
       warn "${tool} install failed — install it manually: ${cmd}"
     fi
   elif [ "$tool" = bun ]; then

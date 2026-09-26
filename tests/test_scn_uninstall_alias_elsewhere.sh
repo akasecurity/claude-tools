@@ -30,7 +30,7 @@ echo "test_scn_uninstall_alias_elsewhere:"
 
 SB="$(sandbox)"
 PROFILE="$SB/.claude-aka"
-ALIAS="aka-claude"   # the derived default launcher name (bare aka is reserved for ai-tc)
+ALIAS="claude-aka"   # the derived default launcher name (bare aka is reserved for ai-tc)
 RC="$SB/.bashrc"
 
 # The user's OWN alias line — same NAME as the kit alias, but a totally different

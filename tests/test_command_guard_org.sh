@@ -23,6 +23,7 @@ SB="$(sandbox)"
 H="$SB/hooks"; mkdir -p "$H/lib"
 cp "$REPO/config/hooks/command-guard.ts" "$H/command-guard.ts"
 cp "$REPO/config/hooks/lib/secret-patterns.json" "$H/lib/secret-patterns.json"
+cp "$REPO/config/hooks/lib/guard-core.js" "$H/lib/guard-core.js"
 G="$H/command-guard.ts"
 rc(){ printf '%s' "$1" | bun "$G" >/dev/null 2>&1; echo $?; }
 bashjson(){ jq -n --arg v "$1" '{tool_name:"Bash",tool_input:{command:$v}}'; }
