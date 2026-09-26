@@ -53,4 +53,37 @@ for pair in "key absent:$noKey" "settings.json missing:$noSettings" "settings.js
   expect_web "$dir" "searxng ghp_" 2 mcp__searxng__searxng_web_search "$GHPQ"
   expect "$dir" "ghp_ curl" 2 "$GHP"
 done
+# A project can switch ai-tc off for itself: an explicit `false` for the ai-tc key in the
+# session cwd's .claude/settings.json or settings.local.json withdraws the deferral, so
+# every guard scans (and rtk-safe rewrites) as if ai-tc were absent. The hook input's
+# `cwd` names the project; only an absolute cwd is honoured.
+proj_off="$tmp/proj-off"; mkdir -p "$proj_off/.claude"
+printf '%s' '{"enabledPlugins":{"ai-tc@akasecurity":false}}' > "$proj_off/.claude/settings.local.json"
+proj_plain="$tmp/proj-plain"; mkdir -p "$proj_plain/.claude"
+expect_cwd() { # <config-dir> <label> <want-exit> <hook> <input-json>
+  local got; set +e; printf '%s' "$5" | CLAUDE_CONFIG_DIR="$1" bun "config/hooks/$4" 2>"$tmp/err"; got=$?; set -e
+  if [ "$got" = "$3" ]; then echo "  ok   $2 (exit $got)"; else echo "  FAIL $2: want exit $3, got $got"; cat "$tmp/err"; fails=$((fails+1)); fi
+}
+bash_cwd() { jq -cn --arg c "$1" --arg d "$2" '{tool_name:"Bash",tool_input:{command:$c},cwd:$d}'; }
+web_cwd() { jq -cn --arg t "$1" --arg q "$2" --arg d "$3" '{tool_name:$t,tool_input:{query:$q},cwd:$d}'; }
+echo "ai-tc enabled in profile, disabled by the project (settings.local.json):"
+expect_cwd "$prof" "ghp_ curl (project disables ai-tc)" 2 command-guard.ts "$(bash_cwd "$GHP" "$proj_off")"
+expect_cwd "$prof" "WebFetch ghp_ (project disables ai-tc)" 2 leak-guard.ts "$(web_cwd WebFetch "$GHPQ" "$proj_off")"
+echo "ai-tc enabled in profile, project without an override:"
+expect_cwd "$prof" "ghp_ curl (still deferred)" 0 command-guard.ts "$(bash_cwd "$GHP" "$proj_plain")"
+expect_cwd "$prof" "WebFetch ghp_ (still deferred)" 0 leak-guard.ts "$(web_cwd WebFetch "$GHPQ" "$proj_plain")"
+echo "ai-tc enabled in profile, relative cwd is ignored:"
+( cd "$tmp" && printf '%s' "$(bash_cwd "$GHP" proj-off)" | CLAUDE_CONFIG_DIR="$prof" bun "$OLDPWD/config/hooks/command-guard.ts" 2>/dev/null ) \
+  && echo "  ok   ghp_ curl, relative cwd (still deferred, exit 0)" \
+  || { echo "  FAIL ghp_ curl, relative cwd: want exit 0"; fails=$((fails+1)); }
+if command -v rtk >/dev/null 2>&1; then
+  rtk_run() { printf '%s' "$(bash_cwd 'git status' "$1")" | CLAUDE_CONFIG_DIR="$prof" HOME="$tmp/home" bun config/hooks/rtk-safe.ts; }
+  echo "rtk-safe, ai-tc enabled in profile:"
+  if [ -z "$(rtk_run "$proj_plain")" ]; then echo "  ok   git status not rewritten (deferred)"
+  else echo "  FAIL git status rewritten while ai-tc covers the project"; fails=$((fails+1)); fi
+  if grep -q updatedInput <<<"$(rtk_run "$proj_off")"; then echo "  ok   git status rewritten (project disables ai-tc)"
+  else echo "  FAIL git status not rewritten though the project disables ai-tc"; fails=$((fails+1)); fi
+else
+  echo "  SKIP rtk-safe project override: rtk not installed"
+fi
 [ "$fails" = 0 ] && echo PASS || { echo "FAIL: $fails check(s)"; exit 1; }

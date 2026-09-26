@@ -72,6 +72,23 @@ export interface AitcDetectOptions {
 	 * different config dir never defers just because ai-tc happens to live in the default one.
 	 */
 	roots?: string[];
+	/**
+	 * Absolute path to the project/repo Claude Code is running in (its hook input `cwd`), used only
+	 * for harness `claude`. Claude Code layers project settings on top of the profile: even when a
+	 * plugin key is enabled at the profile root(s), `<projectDir>/.claude/settings.json` or
+	 * `<projectDir>/.claude/settings.local.json` can set `"<key>": false` in `enabledPlugins` for
+	 * this project, which disables the plugin's hooks here even though it stays enabled elsewhere.
+	 * When either file sets a key that `detectAitc` recognises as ai-tc to `false`, that key is
+	 * treated as not enabled for this call, regardless of the profile-level `enabledPlugins`.
+	 *
+	 * This is a disable-only override: a project file setting a key to `true` never enables a
+	 * plugin that isn't already enabled at the profile level — project settings can only turn a
+	 * profile-enabled plugin off for this project, never turn on a plugin the profile didn't enable.
+	 * An unreadable or corrupt project settings file is ignored (treated as absent, not as
+	 * disabling anything), since the profile-level decision already stands on its own.
+	 * A relative or missing `projectDir` is ignored; only an absolute path is read.
+	 */
+	projectDir?: string;
 	exists?: (p: string) => boolean;
 	readdir?: (p: string) => string[];
 	/** Returns file contents, or null when unreadable. */
@@ -94,7 +111,10 @@ export interface AitcStatus {
  *   `ai-tc` (any marketplace) or `aka` (marketplace `akasecurity` or `ai-tc`), AND the key
  *   `<name>@<marketplace>` is listed in `<root>/plugins/installed_plugins.json` and set to `true`
  *   (not merely present, and not absent, `false`, or any other value) in `<root>/settings.json`
- *   `enabledPlugins`. A cache dir alone does not count.
+ *   `enabledPlugins`. A cache dir alone does not count. When `opts.projectDir` is given, a key
+ *   this otherwise finds enabled is then treated as not enabled if either
+ *   `<projectDir>/.claude/settings.json` or `<projectDir>/.claude/settings.local.json` sets it to
+ *   `false` — see {@link AitcDetectOptions.projectDir}.
  * - codex: `<root>/plugins/cache/<marketplace>/aka-codex` exists.
  * - antigravity: `<home>/.gemini/config/plugins/aka-antigravity` exists.
  * - grok: always absent.

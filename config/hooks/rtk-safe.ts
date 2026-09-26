@@ -35,7 +35,7 @@
 import { readFileSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { rewrite, supportedVersion, detectAitc, coexistencePolicy } from './lib/guard-core.js';
-import { dirname, join } from 'path';
+import { dirname, isAbsolute, join } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 export { rewrite, supportedVersion };
@@ -43,6 +43,13 @@ export { rewrite, supportedVersion };
 interface HookInput {
   tool_name?: string;
   tool_input?: Record<string, unknown> | string;
+  cwd?: unknown;
+}
+
+// The session's project directory, from the hook input's `cwd`. Only an absolute path is
+// passed on: a project's .claude/settings(.local).json can switch ai-tc off for itself.
+function projectOpt(input: { cwd?: unknown }): { projectDir?: string } {
+  return typeof input.cwd === 'string' && isAbsolute(input.cwd) ? { projectDir: input.cwd } : {};
 }
 
 // The profile this session runs in: ai-tc only counts if its hooks run here too.
@@ -56,9 +63,9 @@ function profileRoots(): string[] {
 
 // ai-tc detection only ever turns rewriting off; if it throws, treat ai-tc as present and
 // skip the rewrite — the conservative choice for a rewriter unsure whether ai-tc is here.
-function aitcAllowsRewrite(): boolean {
+function aitcAllowsRewrite(input: HookInput): boolean {
   try {
-    return coexistencePolicy(detectAitc('claude', { home: homedir(), roots: profileRoots() }))
+    return coexistencePolicy(detectAitc('claude', { home: homedir(), roots: profileRoots(), ...projectOpt(input) }))
       .allowRewrite('Bash');
   } catch {
     return false;
@@ -85,7 +92,7 @@ function main(): void {
       : (input.tool_input?.command as string | undefined) ?? '';
   if (!command) process.exit(0);
 
-  if (!aitcAllowsRewrite()) process.exit(0);
+  if (!aitcAllowsRewrite(input)) process.exit(0);
 
   const rewritten = rewrite(command);
   if (rewritten === null || rewritten === command) process.exit(0);

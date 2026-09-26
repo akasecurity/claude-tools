@@ -49,12 +49,12 @@
  */
 import { readFileSync } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, join } from 'path';
+import { dirname, isAbsolute, join } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import type { OrgTier, RuleId } from './lib/guard-core.js';
 
-interface HookInput { tool_name?: string; tool_input?: Record<string, unknown> | string }
+interface HookInput { tool_name?: string; tool_input?: Record<string, unknown> | string; cwd?: unknown }
 
 const CORE_MISSING_MSG = 'egress blocked (leak-guard): the guard-core library is missing or unreadable, so the egress scan can\'t run — blocking this query as a precaution. Reinstall to restore config/hooks/lib/guard-core.js.';
 
@@ -119,6 +119,12 @@ function loadOrgTier(): OrgTier {
   }
 }
 
+// The session's project directory, from the hook input's `cwd`. Only an absolute path is
+// passed on: a project's .claude/settings(.local).json can switch ai-tc off for itself.
+function projectOpt(input: { cwd?: unknown }): { projectDir?: string } {
+  return typeof input.cwd === 'string' && isAbsolute(input.cwd) ? { projectDir: input.cwd } : {};
+}
+
 // The profile this session runs in: ai-tc only counts if its hooks run here too.
 function profileRoots(): string[] {
   const env = process.env.CLAUDE_CONFIG_DIR;
@@ -175,7 +181,7 @@ async function main(): Promise<void> {
   // ai-tc detection only ever turns scanning off; if it throws, scan (the safe direction).
   let scanSecrets = true;
   try {
-    scanSecrets = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots() }))
+    scanSecrets = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots(), ...projectOpt(input) }))
       .scanSecrets(tool) !== false;
   } catch { scanSecrets = true; }
 

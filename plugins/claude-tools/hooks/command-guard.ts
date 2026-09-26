@@ -31,7 +31,7 @@
  */
 import { readFileSync } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, join } from 'path';
+import { dirname, isAbsolute, join } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import type { OrgTier, RuleId } from './lib/guard-core.js';
@@ -48,7 +48,7 @@ const STARTUP_WRITE_RAW = /(?:>|\btee\b|\bsed\b|\bcp\b|\bmv\b|\binstall\b|\bln\b
 const SEARCH_EXEC_RAW = /(?:^|[\s'"])--(?:pre|hostname-bin)(?![\w-])|RIPGREP_CONFIG_PATH=/;
 const CORE_MISSING_NOTICE = '⚠️ command-guard: the guard-core library is missing, unreadable or incompatible — only conservative fallback checks ran. Reinstall to restore config/hooks/lib/guard-core.js.';
 
-interface HookInput { tool_name?: string; tool_input?: Record<string, unknown> | string }
+interface HookInput { tool_name?: string; tool_input?: Record<string, unknown> | string; cwd?: unknown }
 
 // Messages are the kit's public contract; tests/golden pins them. Keys are guard-core RuleIds.
 const BLOCK_MSG: Record<RuleId, (detail?: string) => string> = {
@@ -105,6 +105,12 @@ function loadOrgTier(): OrgTier {
   } catch {
     return { pattern: null, stale: false, patternError: false };
   }
+}
+
+// The session's project directory, from the hook input's `cwd`. Only an absolute path is
+// passed on: a project's .claude/settings(.local).json can switch ai-tc off for itself.
+function projectOpt(input: { cwd?: unknown }): { projectDir?: string } {
+  return typeof input.cwd === 'string' && isAbsolute(input.cwd) ? { projectDir: input.cwd } : {};
 }
 
 // The profile this session runs in: ai-tc only counts if its hooks run here too.
@@ -165,7 +171,7 @@ async function main(): Promise<void> {
   // ai-tc detection only ever turns scanning off; if it throws, scan (the safe direction).
   let scanSecrets = true;
   try {
-    scanSecrets = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots() }))
+    scanSecrets = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots(), ...projectOpt(input) }))
       .scanSecrets('Bash') !== false;
   } catch { scanSecrets = true; }
 

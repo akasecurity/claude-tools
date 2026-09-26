@@ -1,6 +1,6 @@
 // @bun
 // package.json
-var version = "0.2.1";
+var version = "0.2.2";
 // src/shell/tokenize.ts
 var TOKENIZE_MAX_DEPTH = 40;
 function extractParen(s, from) {
@@ -840,6 +840,19 @@ function enabledClaudePlugins(root, readFile) {
   const enabled = isObject(settings) && isObject(settings.enabledPlugins) ? settings.enabledPlugins : {};
   return new Set(Object.keys(registry.plugins).filter((k) => enabled[k] === true));
 }
+function projectDisabledClaudePlugins(projectDir, readFile) {
+  const disabled = new Set;
+  for (const file of ["settings.json", "settings.local.json"]) {
+    const settings = readJson(readFile, join(projectDir, ".claude", file));
+    if (!isObject(settings) || !isObject(settings.enabledPlugins))
+      continue;
+    for (const [k, v] of Object.entries(settings.enabledPlugins)) {
+      if (v === false)
+        disabled.add(k);
+    }
+  }
+  return disabled;
+}
 function detectAitc(harness, opts) {
   const exists = opts.exists ?? existsSync;
   const readdir = opts.readdir ?? ((p) => {
@@ -861,6 +874,8 @@ function detectAitc(harness, opts) {
   const roots = [...new Set(rawRoots.filter((r) => !!r && isAbsolute(r)).map((r) => resolve(r)))];
   const markers = [];
   if (harness === "claude") {
+    const projectDir = opts.projectDir !== undefined && isAbsolute(opts.projectDir) ? resolve(opts.projectDir) : null;
+    const projectDisabled = projectDir ? projectDisabledClaudePlugins(projectDir, readFile) : new Set;
     for (const r of roots) {
       const cache = join(r, "plugins/cache");
       let enabled;
@@ -870,7 +885,8 @@ function detectAitc(harness, opts) {
           if (!isAitcClaudePlugin(d, marketplace))
             continue;
           enabled ??= enabledClaudePlugins(r, readFile);
-          if (enabled.has(`${d}@${marketplace}`))
+          const key = `${d}@${marketplace}`;
+          if (enabled.has(key) && !projectDisabled.has(key))
             markers.push(join(mk, d));
         }
       }

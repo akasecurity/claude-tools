@@ -32,7 +32,9 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   secret scanning on tools ai-tc's own hooks, never rewrites those tools, and does not
   install its status line, so a profile running both never double-scans a secret, never
   rewrites the same tool call twice, and never shows two status lines. Structural blocks
-  (pipe-to-shell, startup-file write, ripgrep exec) still apply regardless.
+  (pipe-to-shell, startup-file write, ripgrep exec) still apply regardless. A project that sets
+  `"ai-tc@akasecurity": false` under `enabledPlugins` in its `.claude/settings.json` or
+  `.claude/settings.local.json` turns the deferral off for sessions in that project.
 
 ### Changed
 - **Default launcher name is `claude-aka`** (was `aka`) for `~/.claude-aka` and the fallback
