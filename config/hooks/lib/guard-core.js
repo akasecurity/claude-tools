@@ -1,6 +1,6 @@
 // @bun
 // package.json
-var version = "0.3.1";
+var version = "0.4.0";
 // src/shell/tokenize.ts
 var TOKENIZE_MAX_DEPTH = 40;
 function extractParen(s, from) {
@@ -587,6 +587,11 @@ var secret_patterns_default = {
 };
 
 // src/egress/patterns.ts
+var LABEL_UNSAFE = /[^A-Za-z0-9 ._-]/g;
+function sanitizeLabel(label) {
+  const stripped = String(label ?? "credential").replace(LABEL_UNSAFE, "");
+  return stripped || "credential";
+}
 function parsePatterns(raw) {
   try {
     const p = raw;
@@ -597,7 +602,7 @@ function parsePatterns(raw) {
     const list = p.credentialPatterns;
     if (list.some((c) => typeof c.pattern !== "string" || !c.pattern))
       return null;
-    const creds = list.map((c) => [new RegExp(c.pattern), String(c.label ?? "credential")]);
+    const creds = list.map((c) => [new RegExp(c.pattern), sanitizeLabel(c.label)]);
     return {
       outbound: new RegExp(p.outboundInvocation, "i"),
       creds,
@@ -720,6 +725,12 @@ function evaluateWebQuery(text, ctx = {}) {
     return block("credential-shape", notices, "contains a token or key value.");
   return { kind: "allow", notices };
 }
+// src/util.ts
+function isPlainObject(v) {
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
 // src/mcp.ts
 var MAX_DEPTH = 32;
 var MAX_LEAVES = 200000;
@@ -730,10 +741,6 @@ function mcpServerOf(tool) {
   const rest = tool.slice(5);
   const i = rest.indexOf("__");
   return i > 0 ? rest.slice(0, i) : null;
-}
-function isPlainObject(v) {
-  const proto = Object.getPrototypeOf(v);
-  return proto === Object.prototype || proto === null;
 }
 function flatten(input) {
   const out = [];
@@ -1090,13 +1097,30 @@ var AITC_HOOKED_TOOLS = {
   antigravity: [],
   grok: []
 };
+var AITC_POST_HOOKED_TOOLS = {
+  claude: ["Bash", "Read", "WebFetch"],
+  codex: ["Bash", "apply_patch"],
+  antigravity: [],
+  grok: []
+};
 function aitcHooks(harness, tool) {
   const hooked = AITC_HOOKED_TOOLS[harness];
   return hooked.length === 0 || hooked.includes(tool) || tool.startsWith("mcp__");
 }
+function aitcPostHooks(harness, tool) {
+  const hooked = AITC_POST_HOOKED_TOOLS[harness];
+  return hooked.length === 0 || hooked.includes(tool);
+}
 function coexistencePolicy(status) {
   if (!status.present) {
-    return { scanSecrets: () => true, redact: true, auditLog: true, statusline: true, allowRewrite: () => true };
+    return {
+      scanSecrets: () => true,
+      redact: true,
+      auditLog: true,
+      statusline: true,
+      allowRewrite: () => true,
+      redactOutput: () => true
+    };
   }
   const free = (tool) => !aitcHooks(status.harness, tool);
   return {
@@ -1104,7 +1128,8 @@ function coexistencePolicy(status) {
     redact: false,
     auditLog: false,
     statusline: false,
-    allowRewrite: free
+    allowRewrite: free,
+    redactOutput: (tool) => !aitcPostHooks(status.harness, tool)
   };
 }
 // src/prompt.ts
@@ -1172,11 +1197,391 @@ function scanPrompt(text, opts = {}) {
   }
   return out;
 }
+// src/redact.ts
+var DEFAULT_MAX_CHARS = 5000000;
+var DEFAULT_MAX_DEPTH = 64;
+function isEscapedAt(source, pos) {
+  let backslashes = 0;
+  for (let i = pos - 1;i >= 0 && source[i] === "\\"; i--)
+    backslashes++;
+  return backslashes % 2 === 1;
+}
+function lazyTail(source) {
+  const brace = /\{(\d+),\}$/.exec(source);
+  if (brace && !isEscapedAt(source, brace.index)) {
+    return `${source.slice(0, brace.index)}{${brace[1]},}?`;
+  }
+  const last = source[source.length - 1];
+  if ((last === "+" || last === "*") && !isEscapedAt(source, source.length - 1)) {
+    return `${source}?`;
+  }
+  return source;
+}
+var globalCredsCache = new WeakMap;
+function globalCreds(pats) {
+  let cached = globalCredsCache.get(pats);
+  if (!cached) {
+    cached = pats.creds.map(([re, label]) => [new RegExp(lazyTail(re.source), re.flags.includes("g") ? re.flags : re.flags + "g"), label]);
+    globalCredsCache.set(pats, cached);
+  }
+  return cached;
+}
+var TOKEN_CHAR_CLASS = "A-Za-z0-9_\\-+/=.";
+var TOKEN_RUN = new RegExp(`[${TOKEN_CHAR_CLASS}]+`, "g");
+function tokenRuns(text) {
+  const runs = [];
+  TOKEN_RUN.lastIndex = 0;
+  let m;
+  while (m = TOKEN_RUN.exec(text))
+    runs.push({ start: m.index, end: m.index + m[0].length });
+  return runs;
+}
+function runContaining(runs, pos) {
+  let lo = 0;
+  let hi = runs.length - 1;
+  while (lo <= hi) {
+    const mid = lo + hi >> 1;
+    const r = runs[mid];
+    if (pos < r.start)
+      hi = mid - 1;
+    else if (pos >= r.end)
+      lo = mid + 1;
+    else
+      return r;
+  }
+  return null;
+}
+var PEM_CAP = 65536;
+var PEM_HEADER = /-----BEGIN ([A-Z0-9 ]*)PRIVATE KEY-----/;
+var PEM_BODY_LINE = /^[A-Za-z0-9+/=]*$/;
+var PEM_HEADER_LINE = /^(?:Proc-Type|DEK-Info):/;
+function extendPemBodyFallback(text, headerEnd, capEnd) {
+  let pos = headerEnd;
+  if (text[pos] === "\r")
+    pos++;
+  if (text[pos] === `
+`)
+    pos++;
+  let blanksSeen = 0;
+  while (pos < capEnd) {
+    const nl = text.indexOf(`
+`, pos);
+    if (nl === -1 || nl >= capEnd)
+      break;
+    let line = text.slice(pos, nl);
+    if (line.endsWith("\r"))
+      line = line.slice(0, -1);
+    if (line.length === 0) {
+      if (++blanksSeen > 1)
+        break;
+    } else if (!PEM_BODY_LINE.test(line) && !PEM_HEADER_LINE.test(line)) {
+      break;
+    }
+    pos = nl + 1;
+  }
+  return pos;
+}
+var PEM_FOOTER_GLOBAL = /-----END ([A-Z0-9 ]*)PRIVATE KEY-----/g;
+var PEM_MAX_HEADERS = 1e4;
+function footerEndsByType(text) {
+  const out = new Map;
+  for (const m of text.matchAll(PEM_FOOTER_GLOBAL)) {
+    const end = m.index + m[0].length;
+    const arr = out.get(m[1]);
+    if (arr)
+      arr.push(end);
+    else
+      out.set(m[1], [end]);
+  }
+  return out;
+}
+function lastAtMost(xs, max) {
+  let lo = 0, hi = xs.length - 1, best = -1;
+  while (lo <= hi) {
+    const mid = lo + hi >> 1;
+    if (xs[mid] <= max) {
+      best = xs[mid];
+      lo = mid + 1;
+    } else
+      hi = mid - 1;
+  }
+  return best;
+}
+function extendPemBlock(text, start, headerEnd, matchText, footerEnds) {
+  const capEnd = Math.min(text.length, start + PEM_CAP);
+  const headerMatch = footerEnds && PEM_HEADER.exec(matchText);
+  if (headerMatch) {
+    const footerLen = `-----END ${headerMatch[1]}PRIVATE KEY-----`.length;
+    const ends = footerEnds.get(headerMatch[1]);
+    if (ends) {
+      const end = lastAtMost(ends, capEnd);
+      if (end !== -1 && end - footerLen >= headerEnd)
+        return end;
+    }
+  }
+  return extendPemBodyFallback(text, headerEnd, capEnd);
+}
+function collectRawMatches(text, patterns) {
+  const out = [];
+  let footerEnds;
+  let pemHeaders = 0;
+  for (const [re, label] of globalCreds(patterns)) {
+    for (const m of text.matchAll(re)) {
+      const start = m.index;
+      const headerEnd = start + m[0].length;
+      if (PEM_HEADER.test(m[0])) {
+        footerEnds ??= footerEndsByType(text);
+        const lookup = ++pemHeaders <= PEM_MAX_HEADERS ? footerEnds : null;
+        out.push({ start, end: extendPemBlock(text, start, headerEnd, m[0], lookup), label, rightNoExtend: true });
+      } else {
+        out.push({ start, end: headerEnd, label });
+      }
+    }
+  }
+  return out;
+}
+function mergeSpans(text, raw) {
+  const allLabels = new Set;
+  const runs = tokenRuns(text);
+  const extended = raw.map((m) => {
+    allLabels.add(m.label);
+    const leftRun = runContaining(runs, m.start);
+    const rightRun = m.rightNoExtend ? null : runContaining(runs, m.end);
+    return {
+      start: leftRun ? Math.min(m.start, leftRun.start) : m.start,
+      end: rightRun ? Math.max(m.end, rightRun.end) : m.end,
+      label: m.label,
+      earliestStart: m.start
+    };
+  });
+  extended.sort((a, b) => a.start - b.start || a.earliestStart - b.earliestStart);
+  const merged = [];
+  for (const span of extended) {
+    const last = merged[merged.length - 1];
+    if (last && span.start <= last.end) {
+      last.end = Math.max(last.end, span.end);
+      if (span.earliestStart < last.earliestStart) {
+        last.label = span.label;
+        last.earliestStart = span.earliestStart;
+      }
+    } else {
+      merged.push({ ...span });
+    }
+  }
+  return { merged, allLabels };
+}
+function redactText(text, patterns = DEFAULT_PATTERNS) {
+  if (!patterns)
+    return { text, count: 0, labels: [] };
+  const raw = collectRawMatches(text, patterns);
+  if (raw.length === 0)
+    return { text, count: 0, labels: [] };
+  const { merged, allLabels } = mergeSpans(text, raw);
+  const parts = [];
+  let cursor = 0;
+  for (const span of merged) {
+    parts.push(text.slice(cursor, span.start), `[REDACTED:${span.label}]`);
+    cursor = span.end;
+  }
+  parts.push(text.slice(cursor));
+  return { text: parts.join(""), count: merged.length, labels: [...allLabels] };
+}
+var warn2 = (code, message) => ({ level: "warn", code, message });
+function redactValue(value, patterns = DEFAULT_PATTERNS, limits = {}) {
+  if (!patterns)
+    return { value, count: 0, labels: [], truncatedScan: false };
+  const maxChars = limits.maxChars ?? DEFAULT_MAX_CHARS;
+  const maxDepth = limits.maxDepth ?? DEFAULT_MAX_DEPTH;
+  let count = 0;
+  const labels = new Set;
+  let chars = 0;
+  let aborted = false;
+  let sawNonPlain = false;
+  const onPath = new WeakSet;
+  const done = new WeakMap;
+  function redactString(s) {
+    chars += s.length;
+    if (chars > maxChars) {
+      aborted = true;
+      return { value: s, changed: false };
+    }
+    const r = redactText(s, patterns);
+    if (r.count > 0) {
+      count += r.count;
+      for (const l of r.labels)
+        labels.add(l);
+    }
+    return { value: r.text, changed: r.count > 0 };
+  }
+  function walk(v, depth) {
+    if (aborted)
+      return { value: v, changed: false };
+    if (typeof v === "string")
+      return redactString(v);
+    if (v === null || typeof v !== "object")
+      return { value: v, changed: false };
+    if (depth > maxDepth) {
+      aborted = true;
+      return { value: v, changed: false };
+    }
+    const obj = v;
+    const cached = done.get(obj);
+    if (cached)
+      return cached;
+    if (onPath.has(obj)) {
+      aborted = true;
+      return { value: v, changed: false };
+    }
+    if (Array.isArray(obj)) {
+      onPath.add(obj);
+      let changed = false;
+      const out = [];
+      for (const item of obj) {
+        const r = walk(item, depth + 1);
+        if (aborted) {
+          onPath.delete(obj);
+          return { value: v, changed: false };
+        }
+        out.push(r.value);
+        changed = changed || r.changed;
+      }
+      onPath.delete(obj);
+      const result = { value: changed ? out : obj, changed };
+      done.set(obj, result);
+      return result;
+    }
+    if (!isPlainObject(obj)) {
+      sawNonPlain = true;
+      const result = { value: obj, changed: false };
+      done.set(obj, result);
+      return result;
+    }
+    onPath.add(obj);
+    let changed = false;
+    const out = Object.create(null);
+    for (const [k, val] of Object.entries(obj)) {
+      const kr = redactString(k);
+      if (aborted) {
+        onPath.delete(obj);
+        return { value: v, changed: false };
+      }
+      const vr = walk(val, depth + 1);
+      if (aborted) {
+        onPath.delete(obj);
+        return { value: v, changed: false };
+      }
+      let finalKey = kr.value;
+      if (Object.prototype.hasOwnProperty.call(out, finalKey)) {
+        let n = 2;
+        while (Object.prototype.hasOwnProperty.call(out, `${finalKey}#${n}`))
+          n++;
+        finalKey = `${finalKey}#${n}`;
+        changed = true;
+      }
+      out[finalKey] = vr.value;
+      changed = changed || kr.changed || vr.changed;
+    }
+    onPath.delete(obj);
+    const result = { value: changed ? out : obj, changed };
+    done.set(obj, result);
+    return result;
+  }
+  const top = walk(value, 0);
+  if (aborted)
+    return { value, count: 0, labels: [], truncatedScan: true };
+  return { value: top.value, count, labels: [...labels], truncatedScan: sawNonPlain };
+}
+function injectionMarkers(text) {
+  if (INJECTION_MARKERS.some((re) => re.test(text))) {
+    return [warn2("output-injection-marker", "output contains a prompt-injection marker.")];
+  }
+  return [];
+}
+// src/audit.ts
+var KEY_ORDER = ["ts", "kit", "harness", "hook", "tool", "kind", "rule", "detail", "snippet"];
+var SANITIZED_FIELD_MAX = { snippet: 200, detail: 200, rule: 100, tool: 100, hook: 100 };
+var SANITIZED_FIELDS = new Set(Object.keys(SANITIZED_FIELD_MAX));
+var KIND_VALUES = new Set(["block", "alert", "redact", "integrity", "prompt"]);
+var TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+var NAME_RE = /^[a-z0-9-]{1,32}$/;
+function validKind(v) {
+  return typeof v === "string" && KIND_VALUES.has(v) ? v : "alert";
+}
+function validTs(v) {
+  return typeof v === "string" && TS_RE.test(v) ? v : new Date().toISOString();
+}
+function validName(v) {
+  return typeof v === "string" && NAME_RE.test(v) ? v : "unknown";
+}
+var REDACTED_MARKER = /\[REDACTED:[^\]]*\]/g;
+function truncateSafely(s, max) {
+  if (s.length <= max)
+    return s;
+  for (const m of s.matchAll(REDACTED_MARKER)) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (start < max && max < end)
+      return s.slice(0, start);
+  }
+  return s.slice(0, max);
+}
+function toStringSafe(v) {
+  if (typeof v === "string")
+    return v;
+  try {
+    const j = JSON.stringify(v);
+    if (typeof j === "string")
+      return j;
+  } catch {}
+  try {
+    return String(v);
+  } catch {
+    return "[unrepresentable]";
+  }
+}
+function sanitize(s, patterns, max) {
+  const redacted = patterns === null ? s : redactText(s, patterns).text;
+  return truncateSafely(redacted, max);
+}
+function formatAuditLine(event, patterns = DEFAULT_PATTERNS) {
+  try {
+    const out = {};
+    for (const key of KEY_ORDER) {
+      const value = event[key];
+      if (key === "ts") {
+        out.ts = validTs(value);
+        continue;
+      }
+      if (key === "kind") {
+        out.kind = validKind(value);
+        continue;
+      }
+      if (key === "kit" || key === "harness") {
+        out[key] = validName(value);
+        continue;
+      }
+      if (value === undefined)
+        continue;
+      if (SANITIZED_FIELDS.has(key)) {
+        const field = key;
+        out[key] = sanitize(toStringSafe(value), patterns, SANITIZED_FIELD_MAX[field]);
+      } else {
+        out[key] = value;
+      }
+    }
+    return `${JSON.stringify(out)}
+`;
+  } catch {
+    return `${JSON.stringify({ ts: new Date().toISOString(), kind: "alert", detail: "unformattable event" })}
+`;
+  }
+}
 
 // src/index.ts
 var VERSION = version;
 export {
   AITC_HOOKED_TOOLS,
+  AITC_POST_HOOKED_TOOLS,
   DEFAULT_PATTERNS,
   INJECTION_MARKERS,
   VERSION,
@@ -1185,8 +1590,12 @@ export {
   evaluateBash,
   evaluateMcpInput,
   evaluateWebQuery,
+  formatAuditLine,
+  injectionMarkers,
   mcpServerOf,
   parsePatterns,
+  redactText,
+  redactValue,
   rewrite,
   scanPrompt,
   structuralChecks,
