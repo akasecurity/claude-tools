@@ -147,21 +147,37 @@ Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.
 
 ### Configuring the opt-in env keys
 
-Three of the guards above are policy you tune per environment, in
+Four of the additions above read per-environment policy from
 [`shared/aka-claude-tools.config.example`](shared/aka-claude-tools.config.example) (copied to
-`aka-claude-tools.config` in your profile on first install). Every key ships empty — the hooks
-are no-ops until you set something. Edit the file, then re-run `./install.sh` to compile it into
-the sidecar the hook reads at runtime.
+`aka-claude-tools.config` in your profile on first install): `leak-guard` and `command-guard`
+(`CT_EGRESS_PATTERNS`), `harness-pointer` (`CT_BLOCKED_CMDS`), `mcp-guard` (`CT_MCP_ALLOW` /
+`CT_MCP_DENY`), and `command-guard`'s bootstrap allowlist (`CT_TRUSTED_BOOTSTRAP_URLS`). Every
+key ships empty, so those policy tiers are inactive until you set one. The guards' built-in
+checks run regardless: `mcp-guard`'s secret scan of every MCP tool input is always on, as are
+the credential scans and structural blocks in `leak-guard` and `command-guard`. Edit the file,
+then re-run `./install.sh` to compile it into the sidecars the hooks read at runtime.
 
 - **`CT_MCP_ALLOW` / `CT_MCP_DENY`** (mcp-guard) — comma-separated MCP **server** names (the
   segment after `mcp__` in a tool name, e.g. `mcp__searxng__web_search` → `searxng`), matched
   case-insensitively. `CT_MCP_DENY` always blocks a listed server; a non-empty `CT_MCP_ALLOW`
   also blocks every server not on it.
 - **`CT_TRUSTED_BOOTSTRAP_URLS`** (command-guard) — space-separated `https://host/path/` prefixes
-  (trailing slash required). The **only** exempted shape is `curl <-f/-s/-S in any combination,
-  or --fail/--silent/--show-error, plus --tlsv1.2 or --proto=https> <an https URL under one of
-  these prefixes> | bash` (or `| sh`) — one pipe, nothing else on the line. Anything wider,
-  including a plain `-L`/`--location` redirect-follow, still blocks. Residual risks worth
+  (trailing slash required; the host needs at least two labels, and path segments use only
+  `A-Z a-z 0-9 . _ ~ -`, never `.` or `..`). The **only** exempted shape is `curl <-f/-s/-S in
+  any combination, or --fail/--silent/--show-error, plus --tlsv1.2 and --proto '=https'> <an
+  https URL under one of these prefixes> | bash` (or `| sh`) — one pipe, nothing else on the
+  line. `--proto` takes its value as a separate word (`--proto '=https'`); the joined
+  `--proto=https` form is not accepted. The URL in the command must have at least one path
+  segment under the prefix, so a bare host root such as `https://sh.rustup.rs` is never
+  exempted; allowlist installers served from a real path. For example, with
+  `CT_TRUSTED_BOOTSTRAP_URLS="https://get.example.dev/install/"`, this exact command is
+  allowed:
+
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://get.example.dev/install/setup.sh | sh
+  ```
+
+  Anything wider, including a plain `-L`/`--location` redirect-follow, still blocks. Residual risks worth
   knowing: curl still reads `~/.curlrc` by default, which can inject flags (including
   `--location`) invisibly to this allowlist; the sidecar's staleness check only detects that
   `aka-claude-tools.config` changed since compile, not that the sidecar's rules still match what

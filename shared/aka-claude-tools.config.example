@@ -1,8 +1,11 @@
 # aka-claude-tools.config — opt-in, environment-specific policy for the guard hooks
 # ════════════════════════════════════════════════════════════════════════════
-# This file tunes two aka-claude-tools hooks to YOUR environment. It ships with
-# every value empty, so the hooks are no-ops until you set something here — the
-# kit never assumes anything about your org, network, or tooling.
+# This file tunes the policy tiers of aka-claude-tools' hooks (leak-guard,
+# command-guard, harness-pointer, mcp-guard) to YOUR environment. It ships with every
+# value empty, so those policy tiers stay inactive until you set something here; the
+# kit never assumes anything about your org, network, or tooling. The hooks' built-in
+# checks (secret scanning, including mcp-guard's scan of every MCP tool input, and
+# command-guard's structural blocks) run whether or not you set anything.
 #
 #   WHAT THIS IS   — policy and patterns: what to redact, what to steer away from.
 #   WHAT IT IS NOT — a place for secrets. Nothing here is a credential. These are
@@ -96,7 +99,7 @@ CT_BLOCKED_HINT="This command isn't the right tool in this environment (aka-clau
 #
 # Example — allow only two servers, and explicitly deny a third even if it later
 # appears on the allow list by mistake:
-#   CT_MCP_ALLOW="searxng,hiring-data"
+#   CT_MCP_ALLOW="github,linear"
 #   CT_MCP_DENY="some-untrusted-server"
 CT_MCP_ALLOW=""
 CT_MCP_DENY=""
@@ -114,13 +117,22 @@ CT_MCP_DENY=""
 # under one of these prefixes> | bash` or `| sh` — nothing else on the command line, no
 # other pipe segment, no other positional argument. Allowed curl flags are exactly
 # -f/-s/-S in any combination (and their long forms --fail/--silent/--show-error), plus
-# --tlsv1.2 and --proto=https; anything else (including the common -L to follow
+# --tlsv1.2 and --proto '=https' (the value as a separate word; the joined
+# --proto=https form is not accepted); anything else (including the common -L to follow
 # redirects) falls outside the exemption and still blocks. The URL itself must be
 # https, with no userinfo, port, query string, or fragment, and its path may not
-# contain "." or ".." segments.
+# contain "." or ".." segments. Each prefix's host needs at least two labels
+# (get.example.dev, not localhost) and its path segments may use only A-Z a-z 0-9
+# . _ ~ - (install.sh rejects anything else).
+#
+# The URL in the command needs at least one path segment under the prefix: a bare host
+# root such as https://sh.rustup.rs is not supported and is never exempted, so only
+# installers served from a real path can be allowlisted.
 #
 # Example:
-#   CT_TRUSTED_BOOTSTRAP_URLS="https://sh.rustup.rs/ https://get.example.dev/install/"
+#   CT_TRUSTED_BOOTSTRAP_URLS="https://get.example.dev/install/"
+# which allows exactly this command (and the same with | bash):
+#   curl --proto '=https' --tlsv1.2 -sSf https://get.example.dev/install/setup.sh | sh
 #
 # Residual risks — read before relying on this as a security boundary:
 #   - curl itself reads ~/.curlrc (and $CURL_HOME/.curlrc) by default, which can inject
