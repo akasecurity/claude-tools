@@ -27,9 +27,15 @@
  * and passes through byte-for-byte.
  *
  * A PostToolUse hook can't block a call that already ran, so this hook never exits non-zero
- * on a decision: it either rewrites the response (redaction), prints a stderr notice
+ * on a decision: it either rewrites the response (redaction), surfaces a user-facing notice
  * (redaction summary, truncated-scan, or an injection marker), or emits nothing at all on a
- * clean, unremarkable result. On an internal failure that disables the whole hook —
+ * clean, unremarkable result. A hook's plain stderr on exit 0 is dropped by Claude Code and
+ * never shown to the user, so every notice goes out as top-level JSON `systemMessage` on
+ * stdout (same channel prompt-guard.ts uses, for the same reason) — an injection-marker
+ * notice additionally lands in `hookSpecificOutput.additionalContext` so the model itself is
+ * warned, not just the human. A redaction rewrite and any notices for the same event share
+ * ONE stdout JSON object. The stderr lines are also still printed, unchanged, for anyone
+ * reading a raw hook transcript. On an internal failure that disables the whole hook —
  * unparseable stdin (or a body that isn't a usable JSON object), guard-core missing or
  * incompatible, or an unexpected error escaping the top level — it prints exactly ONE
  * stderr line saying so and passes the original tool output through unchanged; stdout stays
@@ -84,9 +90,9 @@ function mcpBlockText(block: unknown): string {
 }
 
 // The content-block array to scan for an mcp__* tool_response: the documented bare-array
-// shape, or (fix for a leak the review found) the `{ content: [...] }`-wrapped shape some
-// servers/harness versions return instead. Anything else (e.g. a bare string result) has
-// no block array to walk and returns [].
+// shape, or the `{ content: [...] }`-wrapped shape some servers/harness versions return
+// instead — both need to be recognised, or the wrapped shape's text would leak unredacted.
+// Anything else (e.g. a bare string result) has no block array to walk and returns [].
 function mcpContentBlocks(resp: unknown): unknown[] {
   if (Array.isArray(resp)) return resp;
   if (resp && typeof resp === 'object' && Array.isArray((resp as { content?: unknown }).content)) {
@@ -288,6 +294,24 @@ async function main(): Promise<void> {
     ({ appendAudit } = await import('./lib/audit.ts'));
   } catch { appendAudit = null; }
 
+  // A PostToolUse hook's plain stderr on exit 0 is dropped by Claude Code and never shown
+  // to the user (confirmed against the CLI's own embedded hooks reference, and the same
+  // conclusion integrity-check.ts's file doc already draws for its own exit-0 case: "exit
+  // 0's stderr is dropped"). The one field the docs guarantee is displayed to the user on
+  // ANY hook, any exit code, is top-level JSON `systemMessage` on stdout — the same field
+  // prompt-guard.ts already relies on for this exact reason. So every user-facing notice
+  // below (the redaction count, the too-large-to-scan notice, and injection-marker
+  // notices) is collected here and also emitted that way; the stderr lines are kept
+  // unchanged alongside it, for anyone reading a raw hook transcript. An injection-marker
+  // notice additionally goes into `hookSpecificOutput.additionalContext` so the model
+  // itself — not just the human watching — is warned the content it just received is
+  // untrusted. Both the redaction rewrite and any notices for the SAME event share one
+  // stdout JSON object; Claude Code only reads one JSON value per hook invocation, so a
+  // second console.log would silently lose whichever payload didn't win the race.
+  const systemMessageLines: string[] = [];
+  const injectionContextLines: string[] = [];
+  let updatedOutputField: { key: 'updatedToolOutput' | 'updatedMCPToolOutput'; value: unknown } | null = null;
+
   if (doRedact && isRedactTool(tool)) {
     try {
       const isMcp = tool.startsWith('mcp__');
@@ -298,11 +322,10 @@ async function main(): Promise<void> {
       // redactValue's own truncatedScan is a full-abort (count is always 0 there), so this
       // is unchanged behavior for them: only the truncated notice fires, never a rewrite.
       if (r.count > 0) {
-        const out = isMcp
-          ? { hookSpecificOutput: { hookEventName: 'PostToolUse', updatedMCPToolOutput: r.value } }
-          : { hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: r.value } };
-        console.log(JSON.stringify(out));
-        console.error(P + `redacted ${r.count} secret value(s) from ${tool} output.`);
+        updatedOutputField = { key: isMcp ? 'updatedMCPToolOutput' : 'updatedToolOutput', value: r.value };
+        const msg = `redacted ${r.count} secret value(s) from ${tool} output.`;
+        console.error(P + msg);
+        systemMessageLines.push(P + msg);
         if (appendAudit) {
           try {
             appendAudit(
@@ -313,7 +336,9 @@ async function main(): Promise<void> {
         }
       }
       if (r.truncatedScan) {
-        console.error(P + 'output too large to scan; passed through unredacted.');
+        const msg = 'output too large to scan; passed through unredacted.';
+        console.error(P + msg);
+        systemMessageLines.push(P + msg);
       }
     } catch { /* a redaction failure must never surface anything beyond silence */ }
   }
@@ -326,6 +351,8 @@ async function main(): Promise<void> {
         for (const n of notices) {
           if (!n || typeof n.message !== 'string') continue;
           console.error(P + n.message);
+          systemMessageLines.push(P + n.message);
+          injectionContextLines.push(n.message);
           if (appendAudit) {
             try {
               appendAudit(
@@ -337,6 +364,25 @@ async function main(): Promise<void> {
         }
       }
     } catch { /* an injection-scan failure must never surface anything beyond silence */ }
+  }
+
+  // One JSON object, emitted once, carrying whatever combination of the three notice
+  // types applies to this event. `systemMessage` fires whenever there is anything to
+  // tell the user; `hookSpecificOutput` only appears when there is a rewrite and/or an
+  // injection warning to attach to it (a bare too-large-to-scan notice has neither, so
+  // it ships as `systemMessage` alone, with no `hookSpecificOutput` at all).
+  if (systemMessageLines.length > 0 || updatedOutputField) {
+    try {
+      const out: Record<string, unknown> = {};
+      if (systemMessageLines.length > 0) out.systemMessage = systemMessageLines.join('\n');
+      if (updatedOutputField || injectionContextLines.length > 0) {
+        const hookSpecificOutput: Record<string, unknown> = { hookEventName: 'PostToolUse' };
+        if (updatedOutputField) hookSpecificOutput[updatedOutputField.key] = updatedOutputField.value;
+        if (injectionContextLines.length > 0) hookSpecificOutput.additionalContext = injectionContextLines.join('\n');
+        out.hookSpecificOutput = hookSpecificOutput;
+      }
+      console.log(JSON.stringify(out));
+    } catch { /* stdout failure: the stderr lines above already fired; stay silent here */ }
   }
 }
 

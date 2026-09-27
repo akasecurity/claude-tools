@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # post-guard: the PostToolUse redaction + injection-marker hook on tool OUTPUT
 # (WebFetch|WebSearch|Read|mcp__.*). A sandbox copy of config/hooks — never the repo's
-# own — checks, using the REAL Task-6 fixtures (tests/fixtures/posttooluse/*.json) for
+# own — checks, using the real captured fixtures (tests/fixtures/posttooluse/*.json) for
 # every tool shape:
 #   - a clean fixture produces no stdout, no stderr
 #   - a GHP-shaped secret spliced into the fixture's own text field is redacted, the
 #     rewrite is returned in the tool's ORIGINAL shape (updatedToolOutput /
 #     updatedMCPToolOutput), and the shape matches the original structurally once the
 #     text field is masked in both (a whole-shape jq comparison, not just "no raw token")
+#   - a redaction notice, a too-large-to-scan notice, and an injection marker all also
+#     surface as top-level `systemMessage` on stdout (a PostToolUse hook's stderr on
+#     exit 0 is dropped by Claude Code), sharing ONE JSON object with the redaction
+#     rewrite when both apply to the same event; an injection marker additionally lands
+#     in `hookSpecificOutput.additionalContext` so the model itself is warned
 #   - the ai-tc deferral (Read/WebFetch skip redaction, WebSearch/mcp don't)
 #   - an injection marker in fetched/searched/MCP content (Read is exempt)
-# plus dedicated regression cases for the round-1 review findings:
+# plus dedicated regression cases:
 #   - a non-array mcp tool_response (a bare string, or a { content: [...] } wrapper)
 #     still gets redacted, in its own original shape
 #   - an MCP `resource` block's `resource.text` is redacted; a resource's `blob` and an
@@ -84,6 +89,11 @@ expect_structural_redact() {
   if ! jq -e . >/dev/null 2>&1 < "$tmp/out"; then echo "  FAIL $label: stdout not JSON: $(cat "$tmp/out")"; fails=$((fails+1)); return; fi
   if grep -qF -- "$GHP" "$tmp/out"; then echo "  FAIL $label: raw token leaked into stdout"; fails=$((fails+1)); return; fi
   if ! grep -qF -- "post-guard: redacted" "$tmp/err"; then echo "  FAIL $label: no redact notice: $(cat "$tmp/err")"; fails=$((fails+1)); return; fi
+  local sysmsg; sysmsg="$(jq -r '.systemMessage // "absent"' "$tmp/out")"
+  case "$sysmsg" in
+    "post-guard: redacted"*) : ;;
+    *) echo "  FAIL $label: stdout systemMessage missing/wrong: $sysmsg"; fails=$((fails+1)); return ;;
+  esac
   local expected_resp actual_resp om am
   expected_resp="$(jq -c '.tool_response' <<<"$envelope")"
   actual_resp="$(jq -c ".hookSpecificOutput.$field" "$tmp/out")"
@@ -127,7 +137,7 @@ read_injection="$(jq -c --arg t "$INJECT" '.tool_response.file.content = $t' <<<
 
 other_tool='{"tool_name":"Bash","tool_response":{"stdout":"hi"}}'
 
-echo "clean fixtures (real Task-6 captures, unmodified): no stdout, no stderr:"
+echo "clean fixtures (real captures, unmodified): no stdout, no stderr:"
 h="$(fresh_hooks clean)"
 for fx in "$read_fixture" "$webfetch_fixture" "$websearch_fixture" "$mcp_fixture"; do
   expect_exit "clean fixture: exit 0" 0 "$h" "$bare" "$fx"
@@ -155,15 +165,55 @@ run "$h" "$bare" "$mcp_secret"
   && echo "  ok   mcp: updatedMCPToolOutput is an array (original shape)" \
   || { echo "  FAIL mcp: not an array: $(cat "$tmp/out")"; fails=$((fails+1)); }
 
+# expect_injection_stdout <label> — the injection marker must ALSO surface on
+# stdout, both as top-level systemMessage (so the user sees it — a PostToolUse
+# hook's stderr on exit 0 is dropped) and as hookSpecificOutput.additionalContext
+# (so the model itself is warned), with hookEventName set to PostToolUse.
+expect_injection_stdout() {
+  local sysmsg ctx evt
+  sysmsg="$(jq -r '.systemMessage // "absent"' "$tmp/out")"
+  ctx="$(jq -r '.hookSpecificOutput.additionalContext // "absent"' "$tmp/out")"
+  evt="$(jq -r '.hookSpecificOutput.hookEventName // "absent"' "$tmp/out")"
+  case "$sysmsg" in *"prompt-injection marker."*) : ;; *) echo "  FAIL $1: systemMessage missing/wrong: $sysmsg"; fails=$((fails+1)); return ;; esac
+  case "$ctx" in *"prompt-injection marker."*) : ;; *) echo "  FAIL $1: additionalContext missing/wrong: $ctx"; fails=$((fails+1)); return ;; esac
+  [ "$evt" = "PostToolUse" ] || { echo "  FAIL $1: hookEventName wrong: $evt"; fails=$((fails+1)); return; }
+  echo "  ok   $1"
+}
+
 echo "injection markers: WebFetch, WebSearch, mcp — Read is exempt:"
 expect_exit "WebFetch injection: exit 0" 0 "$h" "$bare" "$webfetch_injection"
 expect_err "WebFetch injection: stderr notice" "post-guard: output contains a prompt-injection marker."
+expect_injection_stdout "WebFetch injection: systemMessage + additionalContext on stdout"
 expect_exit "WebSearch injection (synopsis): exit 0" 0 "$h" "$bare" "$websearch_injection_synopsis"
 expect_err "WebSearch injection (synopsis): stderr notice" "post-guard: output contains a prompt-injection marker."
+expect_injection_stdout "WebSearch injection (synopsis): systemMessage + additionalContext on stdout"
 expect_exit "mcp injection: exit 0" 0 "$h" "$bare" "$mcp_injection"
 expect_err "mcp injection: stderr notice" "post-guard: output contains a prompt-injection marker."
+expect_injection_stdout "mcp injection: systemMessage + additionalContext on stdout"
 expect_exit "Read injection: exit 0" 0 "$h" "$bare" "$read_injection"
 expect_no_err "Read is exempt from injection scanning" "prompt-injection marker"
+expect_no_stdout "Read injection: no stdout at all (exempt, and nothing else to report)"
+
+echo "combined: a redaction AND an injection marker on the same event share ONE stdout JSON object:"
+mcp_secret_and_injection="$(jq -c --arg s "$GHP" --arg t "$INJECT" \
+  '.tool_response = [{type:"text",text:("secret: " + $s)},{type:"text",text:$t}]' <<<"$mcp_fixture")"
+run "$h" "$bare" "$mcp_secret_and_injection"
+[ "$GOT" = 0 ] && echo "  ok   combined mcp redaction+injection: exit 0" || { echo "  FAIL combined mcp redaction+injection: exit $GOT"; fails=$((fails+1)); }
+if grep -qF -- "$GHP" "$tmp/out"; then echo "  FAIL combined: raw token leaked into stdout"; fails=$((fails+1)); fi
+[ "$(jq -r '.hookSpecificOutput.updatedMCPToolOutput[0].text // "absent"' "$tmp/out")" = "secret: [REDACTED:GitHub token]" ] \
+  && echo "  ok   combined: the secret block is redacted" \
+  || { echo "  FAIL combined: secret block not redacted: $(cat "$tmp/out")"; fails=$((fails+1)); }
+[ "$(jq -r '.hookSpecificOutput.updatedMCPToolOutput[1].text // "absent"' "$tmp/out")" = "$INJECT" ] \
+  && echo "  ok   combined: the injection-marker block is passed through (warned, not rewritten)" \
+  || { echo "  FAIL combined: injection block unexpectedly changed: $(cat "$tmp/out")"; fails=$((fails+1)); }
+sysmsg="$(jq -r '.systemMessage // "absent"' "$tmp/out")"
+case "$sysmsg" in
+  *"redacted 1 secret value(s)"*"prompt-injection marker."*) echo "  ok   combined: systemMessage carries BOTH notices, one JSON object" ;;
+  *) echo "  FAIL combined: systemMessage missing one of the two notices: $sysmsg"; fails=$((fails+1)) ;;
+esac
+[ "$(jq -r '.hookSpecificOutput.additionalContext // "absent"' "$tmp/out")" = "output contains a prompt-injection marker." ] \
+  && echo "  ok   combined: additionalContext carries the injection notice alongside the rewrite" \
+  || { echo "  FAIL combined: additionalContext wrong: $(cat "$tmp/out")"; fails=$((fails+1)); }
 
 echo "fix 7 — WebSearch injection scan covers hit TITLES, not just the synopsis/urls:"
 expect_exit "WebSearch injection (title): exit 0" 0 "$h" "$bare" "$websearch_injection_title"
@@ -249,7 +299,7 @@ run "$h" "$bare" "$read_image"
 expect_no_stdout "Read image response: no rewrite (file.base64 is never scanned)"
 expect_no_err "Read image response: no redact notice" "post-guard: redacted"
 
-echo "large output (Read, real fixture content extended): aborts the scan, no stdout, truncated notice:"
+echo "large output (Read, real fixture content extended): aborts the scan, no rewrite, truncated notice on both channels:"
 big="$tmp/big.json"
 bun -e '
 const fixture = await Bun.file(process.argv[1]).json();
@@ -265,8 +315,13 @@ end=$(date +%s)
 elapsed=$((end - start))
 [ "$GOT" = 0 ] && echo "  ok   large output: exit 0" || { echo "  FAIL large output: exit $GOT"; fails=$((fails+1)); }
 [ "$elapsed" -lt 3 ] && echo "  ok   large output: finished in ${elapsed}s (< 3s)" || { echo "  FAIL large output: took ${elapsed}s"; fails=$((fails+1)); }
-expect_no_stdout "large output: no stdout"
 expect_err "large output: truncated-scan notice" "post-guard: output too large to scan; passed through unredacted."
+[ "$(jq -r '.systemMessage // "absent"' "$tmp/out")" = "post-guard: output too large to scan; passed through unredacted." ] \
+  && echo "  ok   large output: truncated-scan notice also on stdout systemMessage" \
+  || { echo "  FAIL large output: unexpected stdout: $(cat "$tmp/out")"; fails=$((fails+1)); }
+[ "$(jq -r 'has("hookSpecificOutput")' "$tmp/out")" = "false" ] \
+  && echo "  ok   large output: no hookSpecificOutput (no rewrite, no injection context)" \
+  || { echo "  FAIL large output: unexpected hookSpecificOutput: $(cat "$tmp/out")"; fails=$((fails+1)); }
 
 echo "internal failure: exactly one stderr line, no stdout, exit 0 (never blocks):"
 h2="$(fresh_hooks nocore)"; rm -f "$h2/lib/guard-core.js"

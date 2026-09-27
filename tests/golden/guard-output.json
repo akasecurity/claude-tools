@@ -269,7 +269,7 @@
     "id": "pg-redact",
     "exit": 0,
     "stderr": "post-guard: redacted 1 secret value(s) from Read output.\n",
-    "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"updatedToolOutput\":{\"type\":\"text\",\"file\":{\"filePath\":\"/tmp/example.txt\",\"content\":\"token: [REDACTED:GitHub token]\",\"numLines\":1,\"startLine\":1,\"totalLines\":1}}}}\n"
+    "stdout": "{\"systemMessage\":\"post-guard: redacted 1 secret value(s) from Read output.\",\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"updatedToolOutput\":{\"type\":\"text\",\"file\":{\"filePath\":\"/tmp/example.txt\",\"content\":\"token: [REDACTED:GitHub token]\",\"numLines\":1,\"startLine\":1,\"totalLines\":1}}}}\n"
   },
   {
     "id": "pg-clean",
@@ -281,6 +281,6 @@
     "id": "pg-injection",
     "exit": 0,
     "stderr": "post-guard: output contains a prompt-injection marker.\n",
-    "stdout": ""
+    "stdout": "{\"systemMessage\":\"post-guard: output contains a prompt-injection marker.\",\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"output contains a prompt-injection marker.\"}}\n"
   }
 ]

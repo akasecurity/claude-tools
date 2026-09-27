@@ -23,10 +23,13 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   a file read, a fetched page, a search result, or an MCP tool's returned content,
   rewriting the tool's output before the model ever sees it — a PostToolUse hook can't
   block a call that already ran, so this only rewrites or passes through unchanged, never
-  denies. Also warns, stderr only, never a block, when fetched, searched, or MCP-returned
-  content carries a prompt-injection phrase ("ignore previous instructions", …), since
-  that's content the agent didn't author and should treat as untrusted data. Non-text MCP
-  content (images, embedded binary resources) is never scanned. Requires `bun`, a hard
+  denies. Also warns, via Claude Code's `systemMessage` channel, never a block, when
+  fetched, searched, or MCP-returned content carries a prompt-injection phrase ("ignore
+  previous instructions", …), since that's content the agent didn't author and should
+  treat as untrusted data; the same warning is also passed to the model itself as
+  additional context. An MCP resource block's own text is scanned and redacted like any
+  other text content; only image data and a resource's binary blob field are never
+  scanned. Requires `bun`, a hard
   dependency like the other bun-based guards. Defers to ai-tc for `Read` and `WebFetch`
   when ai-tc already covers those tools in the profile; `WebSearch`, `mcp__*`, and the
   injection-marker warning always run regardless.
