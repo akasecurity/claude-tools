@@ -55,8 +55,10 @@ about to go, separating **kit-managed** from **their own**:
   come from this repo's `config/additions.json`.
 - **The user's own (irreplaceable):** `agents/`, `skills/`, `commands/`, `hooks/`
   that are **not** kit-managed; `CLAUDE.md` and any `@`-imports; `.mcp.json` / MCP
-  config; `settings.json` customisations; and session history (`projects/`,
-  `history.jsonl`, `todos/`, `sessions/`).
+  config; `settings.json` customisations; session history (`projects/`,
+  `history.jsonl`, `todos/`, `sessions/`); and the kit's own local security-event
+  audit log (`logs/security-*.jsonl`) — a re-install recreates the hooks that
+  write it, but not the history already recorded.
 - **Auth:** `.credentials.json` (file-based logins) is removed with the dir.
 
 Offer to **back the profile up first** — copy it to a timestamped sibling
