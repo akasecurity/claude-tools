@@ -57,10 +57,13 @@ export function notice(changedFiles: number, settingsDrift: boolean): string {
     + `${settingsDrift ? 'settings drift' : 'settings OK'}; run aka-claude-tools --audit`;
 }
 
-// The profile this session runs in. Same resolution as the other kit hooks.
+// The profile this session runs in. Same resolution as the other kit hooks, plus trailing
+// slashes stripped: the installer records the profile without one, and a "<dir>/" spelling
+// would otherwise turn every "<dir>/hooks/<file>" needle into "<dir>//hooks/<file>" and
+// report every kit hook registration as settings drift.
 function profileRoots(): string[] {
   const env = process.env.CLAUDE_CONFIG_DIR;
-  if (env && env.startsWith('/')) return [env];
+  if (env && env.startsWith('/')) return [env.replace(/\/+$/, '') || '/'];
   const hooksDir = dirname(fileURLToPath(import.meta.url));
   if (hooksDir.endsWith('/hooks') && !hooksDir.includes('/plugins/')) return [dirname(hooksDir)];
   return [join(homedir(), '.claude')];

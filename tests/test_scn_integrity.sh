@@ -21,6 +21,11 @@
 #      off, is settings drift, and --audit names the missing registration
 #   L. a launcher shim written by --alias is recorded (and dropped again by
 #      --delete-alias); editing it is drift
+#   M. a trailing slash on CLAUDE_CONFIG_DIR is not settings drift
+#   N. --alias/--delete-alias for one name re-records only that shim, never an
+#      edited shim of another name
+#   O. --audit warns on disableAllHooks and bypassPermissions without counting
+#      either as drift
 #
 # Fully sandboxed: HOME, CT_CONFIG_DIR and CLAUDE_CONFIG_DIR all point into a
 # temp dir for every install.sh and hook invocation.
@@ -185,6 +190,50 @@ CT_CONFIG_DIR="$DIR" CLAUDE_CONFIG_DIR="$DIR" CT_ALIAS="ic-test-launch" HOME="$S
   bash "$INSTALL" --delete-alias >"$SB/alias.log" 2>&1
 assert_ok "L. --delete-alias drops the shim from the manifest" jq -e '.files | has("bin/ic-test-launch") | not' "$DIR/.aka-integrity.json"
 expect_silent "L. shim removed → clean"
+
+# ── M. trailing slash on CLAUDE_CONFIG_DIR ───────────────────────────────────
+CLAUDE_CONFIG_DIR="$DIR/" HOME="$SB" bun "$DIR/hooks/integrity-check.ts" </dev/null >"$SB/out" 2>"$SB/err"
+if [ "$?" = "0" ] && [ ! -s "$SB/err" ]; then pass "M. CLAUDE_CONFIG_DIR with a trailing slash → still clean"
+else fail "M. CLAUDE_CONFIG_DIR with a trailing slash → still clean" "err=$(cat "$SB/err")"; fi
+CLAUDE_CONFIG_DIR="$DIR//" HOME="$SB" bun "$DIR/hooks/integrity-check.ts" </dev/null >"$SB/out" 2>"$SB/err"
+if [ "$?" = "0" ] && [ ! -s "$SB/err" ]; then pass "M. CLAUDE_CONFIG_DIR with two trailing slashes → still clean"
+else fail "M. CLAUDE_CONFIG_DIR with two trailing slashes → still clean" "err=$(cat "$SB/err")"; fi
+settings_edit '.permissions.deny -= ["Read(~/.aws/**)"]'
+CLAUDE_CONFIG_DIR="$DIR/" HOME="$SB" bun "$DIR/hooks/integrity-check.ts" </dev/null >"$SB/out" 2>"$SB/err"
+assert_eq "M. trailing slash still reports real settings drift" "$NOTICE_SET" "$(cat "$SB/err")"
+inst
+
+# ── N. a shim update records only that shim ──────────────────────────────────
+alias_run() { # <--alias|--delete-alias> <name>
+  CT_CONFIG_DIR="$DIR" CLAUDE_CONFIG_DIR="$DIR" CT_ALIAS="$2" HOME="$SB" SHELL=/bin/bash \
+    bash "$INSTALL" "$1" >"$SB/alias.log" 2>&1
+}
+alias_run --alias ic-launch-a; alias_run --alias ic-launch-b
+expect_silent "N. two shims written → clean"
+printf 'echo hijacked\n' >> "$DIR/bin/ic-launch-a"
+a_before="$(jq -r '.files["bin/ic-launch-a"]' "$DIR/.aka-integrity.json")"
+alias_run --alias ic-launch-b
+assert_eq "N. --alias for one name leaves another shim's recorded hash alone" \
+  "$a_before" "$(jq -r '.files["bin/ic-launch-a"]' "$DIR/.aka-integrity.json")"
+expect_notice "N. the edited shim is still drift after --alias for another name" "$NOTICE_FILE"
+alias_run --delete-alias ic-launch-b
+assert_ok "N. --delete-alias drops only its own shim" \
+  jq -e '(.files | has("bin/ic-launch-b") | not) and .files["bin/ic-launch-a"] == $a' --arg a "$a_before" "$DIR/.aka-integrity.json"
+expect_notice "N. the edited shim is still drift after --delete-alias for another name" "$NOTICE_FILE"
+alias_run --delete-alias ic-launch-a
+expect_silent "N. edited shim removed → clean"
+
+# ── O. --audit warns on settings that switch the kit off ─────────────────────
+settings_edit '.disableAllHooks = true | .permissions.defaultMode = "bypassPermissions"'
+HOME="$SB" CT_CONFIG_DIR="$DIR" CLAUDE_CONFIG_DIR="$DIR" bash "$INSTALL" --audit >"$SB/audit.out" 2>&1
+assert_eq "O. --audit still exits 0 (warnings are not drift)" "0" "$?"
+assert_lit "O. --audit warns on disableAllHooks" "sets disableAllHooks" "$SB/audit.out"
+assert_lit "O. --audit warns on bypassPermissions" "enables bypassPermissions" "$SB/audit.out"
+expect_silent "O. neither setting is part of the settings hash"
+settings_edit 'del(.disableAllHooks) | del(.permissions.defaultMode)'
+HOME="$SB" CT_CONFIG_DIR="$DIR" CLAUDE_CONFIG_DIR="$DIR" bash "$INSTALL" --audit >"$SB/audit.out" 2>&1
+assert_nlit "O. no disableAllHooks warning when unset" "disableAllHooks" "$SB/audit.out"
+assert_nlit "O. no bypassPermissions warning when unset" "bypassPermissions" "$SB/audit.out"
 
 # ── J. deselect every bun hook ───────────────────────────────────────────────
 inst "secure-settings"

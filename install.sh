@@ -666,7 +666,7 @@ write_launcher_shim() {
     "$AKA_SHIM_MARKER" "$config_dir" > "$shim" \
     || die "Cannot write the launcher shim at ${shim} — your shell rc was NOT modified."
   chmod +x "$shim" || die "Cannot make ${shim} executable — your shell rc was NOT modified."
-  integrity_refresh_bin "$config_dir"
+  integrity_refresh_bin "$config_dir" "$name"
 }
 
 # launcher_path_representable <config_dir> — PATH is colon-delimited, so a config
@@ -767,7 +767,7 @@ write_deprecated_shim() {
     printf 'exec "%s/bin/%s" "$@"\n' "$config_dir" "$new"
   } > "$shim" || die "Cannot write the launcher shim at ${shim} — your shell rc was NOT modified."
   chmod +x "$shim" || die "Cannot make ${shim} executable — your shell rc was NOT modified."
-  integrity_refresh_bin "$config_dir"
+  integrity_refresh_bin "$config_dir" "$old"
 }
 
 # deprecated_block_content <config_dir> <old> <new> — the forwarder's managed rc block
@@ -1402,16 +1402,22 @@ write_integrity_manifest() {
   fi
 }
 
-# integrity_refresh_bin <config_dir> — after a launcher shim is written or removed,
-# re-record ONLY the bin/ entries. Hooks, lib and the settings hash stay as the last
-# install recorded them, so a shim update never launders drift elsewhere.
-# No manifest yet → nothing to do.
+# integrity_refresh_bin <config_dir> <name> — after the launcher shim bin/<name> is
+# written or removed, re-record ONLY that one entry: its hash when it is present and
+# carries the shim marker, otherwise its key is dropped. Every other entry (hooks, lib,
+# other shims) and the settings hash stay as the last install recorded them, so an
+# --alias or --delete-alias for one name never launders an edited or forged file,
+# including another name's shim. No manifest yet → nothing to do.
 integrity_refresh_bin() {
-  local d="$1" f="$1/.aka-integrity.json" bin tmp
-  [ -f "$f" ] || return 0
-  bin="$(integrity_hash_files "$d" bin/)" || return 0
+  local d="$1" name="$2" f="$1/.aka-integrity.json" rel h="" tmp
+  [ -f "$f" ] && [ -n "$name" ] || return 0
+  rel="bin/$name"
+  if [ -f "$d/$rel" ] && grep -qF "$AKA_SHIM_MARKER" "$d/$rel" 2>/dev/null; then
+    h="$(sha256_file "$d/$rel" 2>/dev/null)" || h=""
+  fi
   tmp="$f.tmp.$$"
-  if jq --argjson b "$bin" '.files |= (with_entries(select(.key | startswith("bin/") | not)) + $b)' "$f" > "$tmp" 2>/dev/null; then
+  if jq --arg k "$rel" --arg h "$h" \
+       'if $h == "" then .files |= del(.[$k]) else .files[$k] = $h end' "$f" > "$tmp" 2>/dev/null; then
     mv -f "$tmp" "$f"
   else
     rm -f "$tmp"
@@ -2268,7 +2274,7 @@ _remove_marked_shim() {
   elif grep -qF "$AKA_SHIM_MARKER" "$dir/bin/$name"; then
     rm -f "$dir/bin/$name"
     rmdir "$dir/bin" 2>/dev/null || true
-    integrity_refresh_bin "$dir"
+    integrity_refresh_bin "$dir" "$name"
     ok "Removed launcher shim ${dir}/bin/${name}"
   fi
 }
@@ -2562,6 +2568,19 @@ integrity_audit_entry() {
       | .[]')"
     if [ -n "$listed" ]; then say "$listed"
     else say "  a kit-managed hook registration, statusLine or sandbox value was edited"; fi
+  fi
+
+  # Settings that switch the kit off without changing anything the manifest hashes.
+  # Warnings only: they are the user's call and not part of the drift verdict.
+  if [ -f "$config_dir/settings.json" ]; then
+    if jq -e '.disableAllHooks == true' "$config_dir/settings.json" >/dev/null 2>&1; then
+      warn "This profile's settings.json sets disableAllHooks —"
+      warn "no hooks run while it is set, including the kit's guards and this integrity check."
+    fi
+    if jq -e '.permissions.defaultMode == "bypassPermissions"' "$config_dir/settings.json" >/dev/null 2>&1; then
+      warn "This profile's settings.json enables bypassPermissions —"
+      warn "Claude runs without permission prompts, so the kit's deny rules are NOT enforced while it is set."
+    fi
   fi
 
   say ""
