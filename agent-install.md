@@ -93,6 +93,9 @@ don't specify one:
   the catalog + recommended defaults): secure base settings, leak-guard,
   command-guard (needs `bun`; also blocks writes to shell startup files),
   mcp-guard (needs `bun`; MCP server allow/deny lists plus a secret scan of MCP inputs),
+  post-guard (needs `bun`; redacts secret-shaped values from what a file read, a web
+  fetch, a web search, or an MCP tool call returns, and warns, never blocks, on
+  prompt-injection phrasing in that returned content),
   rtk-safe (inert until stable `rtk` >= 0.49.0 is installed), responsive status line, shell-audit,
   the recommended nonessential-traffic toggles that don't touch Remote Control
   (error-reporting-off, feedback-off, feedback-survey-off), the opt-out `/wrap-up`
@@ -312,6 +315,10 @@ the user's go-ahead.
   managed rc block carries the guarded `PATH` export for `<cfg>/bin` — unless the
   profile path contains a `:`, which cannot be expressed as a `PATH` entry; the
   installer then writes the alias and shim only, and says so.
+- `--apply` also writes `<dir>/.aka-integrity.json`, the manifest a `SessionStart`
+  hook checks on every future launch of this profile. `./install.sh --audit "<dir>"`
+  should exit 0 (no drift) right after a fresh install; if it doesn't, something in
+  the apply step above didn't land as expected — investigate before reporting done.
 - Summarize what was migrated, what was added, the auth outcome, and any
   edge cases you handled or flagged. Tell the user to open a new shell and run
   the alias.

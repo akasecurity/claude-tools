@@ -28,9 +28,14 @@ adds the guardrails for the obvious foot-guns:
 - **`curl … | bash`** and friends (piping a web script straight into your shell) → blocked.
 - **Editing your shell startup files** (a common way things quietly persist) → blocked.
 - **Secrets leaving in a web request** → matched on your machine and blocked.
+- **Secrets already in the model's context** (a file it read, a page it fetched, a search
+  result, an MCP response) → redacted before the model sees them; fetched or MCP content
+  carrying a prompt-injection phrase like "ignore previous instructions" is flagged too.
 - **Context filling with noise** (chatty command output) → summarized before it reaches the model.
+- **A kit file quietly edited, or a security setting reverted** → flagged at the next
+  session start, with `--audit` to see exactly what changed.
 
-Nineteen small pieces, eleven on by default and eight opt-in. Each stands alone. Take what you want.
+Eighteen small pieces, eleven on by default and seven opt-in. Each stands alone. Take what you want.
 
 **claude-tools is safe defaults for the harness; [ai-tc](https://github.com/akasecurity/ai-tc) is the detection engine.** The secret scan here is a shallow fallback — pattern and key-shape matching on egress. It does not detect PII, PHI, or cardholder data, and it does not redact. When you need deep content detection with an audit trail, add ai-tc; the installer offers it. The two compose: posture from claude-tools, detection from ai-tc.
 
@@ -120,7 +125,7 @@ A guard you haven't watched fire is one you're only assuming works. Launch the p
 
 <p align="center"><img src="media/whats-inside.svg" alt="What's inside: additions grouped by what they do (graphic not yet refreshed for this release's count)." width="100%"></p>
 
-Nineteen additions; the menu is driven entirely by
+Eighteen additions; the menu is driven entirely by
 [`config/additions.json`](config/additions.json), the single source both install paths read.
 Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.pdf).
 
@@ -188,6 +193,70 @@ then re-run `./install.sh` to compile it into the sidecars the hooks read at run
 Full format details and worked examples for all three keys live as comments directly in
 [`shared/aka-claude-tools.config.example`](shared/aka-claude-tools.config.example) — read it before
 setting any of them.
+
+## Local security-event audit log
+
+`command-guard`, `leak-guard`, `mcp-guard`, and `prompt-guard` each write one line
+per block, alert, or prompt-injection notice to a local, append-only log:
+`<profile>/logs/security-<YYYY-MM>.jsonl` (one file per UTC month, created at mode
+`0700`, each file at `0600`). Read it with:
+
+```bash
+./install.sh --audit-log [--month YYYY-MM] [PROFILE_DIR]
+```
+
+which prints a count of any unparseable lines skipped, counts by kind and rule, then
+the last 20 events. Profile resolution matches the other read-only modes: the
+positional `PROFILE_DIR`, else `CT_CONFIG_DIR`, else the default profile
+(`~/.claude`).
+
+**Privacy.** A line never carries a full prompt, command, or tool output, only a
+redacted snippet capped at 200 characters, run through the same secret-pattern scan
+the guards use on egress. `--audit-log` re-renders every event through that same
+redaction pass again on read, so a hand-edited or corrupted line already on disk
+can't hand a raw value back to you either. Writing the log never changes a guard's
+decision: a write failure (a read-only profile, a symlinked `logs/`) is swallowed
+silently, the same as any other logging failure.
+
+**Off with ai-tc.** When [ai-tc](https://github.com/akasecurity/ai-tc) is present
+and enabled for the profile, this log turns off entirely. ai-tc keeps its own audit
+trail, so claude-tools steps aside instead of double-logging the same decision.
+
+## Integrity check
+
+The installer writes an integrity manifest, `<profile>/.aka-integrity.json`: a
+sha256 of every kit-managed hook, library file, and launcher shim, plus a hash of
+the kit-managed slice of `settings.json` (its own hook registrations, the deny
+rules it shipped, `sandbox.enabled`, and `statusLine` — never your own hooks,
+allow/ask rules, or env keys). An internal `SessionStart` hook, not a selectable
+addition (it rides alongside any other bun-based hook, the way the plugin's own
+preflight check does), re-checks the profile against that manifest on every
+launch, resume, clear, compact, and fork. When something has drifted, it prints
+one line to stderr:
+
+```
+claude-tools: N kit file(s) changed or missing, settings drift; run aka-claude-tools --audit
+```
+
+For the detail, run:
+
+```bash
+./install.sh --audit [PROFILE_DIR]
+```
+
+which lists exactly what changed, went missing, or turned up unexpected under
+`hooks/lib/`, names any kit-managed setting that drifted (a missing deny rule, a
+hook registration, `statusLine`, or `sandbox.enabled`), and warns separately when
+`disableAllHooks` or `permissions.defaultMode: "bypassPermissions"` is set — both
+turn the kit's guards off without changing anything the manifest hashes. Exits 0
+clean, 1 on drift or a missing manifest.
+
+This is **detection, not a boundary**: anything able to rewrite a kit file can
+rewrite the manifest alongside it, so it catches careless edits and accidental
+drift, not a determined attacker. Like the audit log, it never blocks — a
+`SessionStart` hook can only print, and the check fails silent on its own
+internal error — and it runs regardless of ai-tc; only the audit log defers to
+ai-tc's own trail.
 
 ## Profiles
 
