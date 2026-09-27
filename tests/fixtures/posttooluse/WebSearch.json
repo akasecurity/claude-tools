@@ -1,0 +1,29 @@
+{
+  "session_id": "example-session-id",
+  "transcript_path": "/tmp/example/transcript.jsonl",
+  "cwd": "/tmp/example",
+  "prompt_id": "example-prompt-id",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "WebSearch",
+  "tool_input": {
+    "query": "example domain"
+  },
+  "tool_response": {
+    "query": "example domain",
+    "results": [
+      {
+        "tool_use_id": "example-server-tool-use-id",
+        "content": [
+          { "title": "Example Domain", "url": "https://example.com/" },
+          { "title": "Example Reference Page", "url": "https://example.com/reference" }
+        ]
+      },
+      "Example synthesized summary text describing the search results, standing in for the model's own prose synopsis of the hits above."
+    ],
+    "durationSeconds": 5.625739208,
+    "searchCount": 1
+  },
+  "tool_use_id": "example-tool-use-id",
+  "duration_ms": 5626
+}

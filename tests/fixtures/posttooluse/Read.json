@@ -1,0 +1,24 @@
+{
+  "session_id": "example-session-id",
+  "transcript_path": "/tmp/example/transcript.jsonl",
+  "cwd": "/tmp/example",
+  "prompt_id": "example-prompt-id",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/tmp/example/note.txt"
+  },
+  "tool_response": {
+    "type": "text",
+    "file": {
+      "filePath": "/tmp/example/note.txt",
+      "content": "This is an example line of file content.\nA second example line follows.\n",
+      "numLines": 2,
+      "startLine": 1,
+      "totalLines": 2
+    }
+  },
+  "tool_use_id": "example-tool-use-id",
+  "duration_ms": 7
+}

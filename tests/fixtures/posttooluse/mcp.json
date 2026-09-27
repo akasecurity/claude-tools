@@ -1,0 +1,22 @@
+{
+  "session_id": "example-session-id",
+  "transcript_path": "/tmp/example/transcript.jsonl",
+  "cwd": "/tmp/example",
+  "prompt_id": "example-prompt-id",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__example__get_example_fact",
+  "tool_input": {},
+  "tool_response": [
+    {
+      "type": "text",
+      "text": "Example fact: this is synthetic MCP tool output text."
+    }
+  ],
+  "tool_use_id": "example-tool-use-id",
+  "duration_ms": 4,
+  "mcp_server": {
+    "name": "example",
+    "source": "dynamic"
+  }
+}
