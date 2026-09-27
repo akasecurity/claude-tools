@@ -1384,20 +1384,21 @@ apply_additions() {
   # required runtime aborts cleanly with no partial apply (in interactive mode the
   # profile dir isn't created until the build mkdir below; --apply pre-creates an
   # empty dir at apply_entry, which is benign — no settings/payload/rc are written).
-  # command-guard, leak-guard and mcp-guard are default-on SECURITY hooks whose runtime
-  # is bun; shipping one silently disabled is not an option, so a missing bun ABORTS rather
-  # than soft-skips. The statusline, rtk-safe and prompt-guard are .ts hooks that also
-  # cannot run without bun (they can't degrade like the old bash versions), so bun is
-  # required when ANY of the six is selected — a selection with none still installs.
-  # prompt-guard is opt-in and warn-only at RUNTIME, but at INSTALL time it needs the same
-  # gate as the others: the registration below embeds bun's resolved absolute path, and
-  # there is no such path to embed without bun present. ensure_dep offers to install bun
-  # first (interactive); it die()s only on decline / non-interactive-absent, so a partial
-  # apply is impossible.
+  # command-guard, leak-guard, mcp-guard and post-guard are default-on SECURITY hooks
+  # whose runtime is bun; shipping one silently disabled is not an option, so a missing
+  # bun ABORTS rather than soft-skips. The statusline, rtk-safe and prompt-guard are .ts
+  # hooks that also cannot run without bun (they can't degrade like the old bash
+  # versions), so bun is required when ANY of the seven is selected — a selection with
+  # none still installs. prompt-guard is opt-in and warn-only at RUNTIME, but at INSTALL
+  # time it needs the same gate as the others: the registration below embeds bun's
+  # resolved absolute path, and there is no such path to embed without bun present.
+  # ensure_dep offers to install bun first (interactive); it die()s only on decline /
+  # non-interactive-absent, so a partial apply is impossible.
   if is_selected command-guard "$_sel_ids" || is_selected leak-guard "$_sel_ids" \
-     || is_selected mcp-guard "$_sel_ids" || is_selected prompt-guard "$_sel_ids" \
+     || is_selected mcp-guard "$_sel_ids" || is_selected post-guard "$_sel_ids" \
+     || is_selected prompt-guard "$_sel_ids" \
      || is_selected statusline "$_sel_ids" || is_selected rtk-safe "$_sel_ids"; then
-    ensure_dep bun "bun — required runtime for command-guard, leak-guard, mcp-guard, prompt-guard, statusline, and/or rtk-safe" 1
+    ensure_dep bun "bun — required runtime for command-guard, leak-guard, mcp-guard, post-guard, prompt-guard, statusline, and/or rtk-safe" 1
     # Warn ONCE per run (not once per hook below) when the bun about to be baked into
     # every selected hook's absolute path is the one npm installed alongside THIS
     # package (its own node_modules, or the hoisted ../../.bin one level up), not a
@@ -1488,8 +1489,8 @@ apply_additions() {
   # and guard-core.js (scanPrompt, detectAitc), so it's a consumer too — its own missing-
   # patterns/missing-core paths just degrade silently rather than failing closed.
   if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" \
-    || is_selected mcp-guard "$_sel_ids" || is_selected rtk-safe "$_sel_ids" \
-    || is_selected prompt-guard "$_sel_ids"; then
+    || is_selected mcp-guard "$_sel_ids" || is_selected post-guard "$_sel_ids" \
+    || is_selected rtk-safe "$_sel_ids" || is_selected prompt-guard "$_sel_ids"; then
     place_dir "$CONFIG_SRC/hooks/lib" "$config_dir/hooks"
   fi
 
@@ -1547,6 +1548,19 @@ apply_additions() {
     ok "mcp-guard enabled (bun: $bun_bin)"
     # No trufflehog offer here: mcp-guard runs the regex tiers only (it fires on every
     # MCP call, so trufflehog's per-call cost stays on the Bash and web egress guards).
+  fi
+  if is_selected post-guard "$_sel_ids"; then
+    # bun is guaranteed present here — the hard-dependency gate above aborts the install
+    # if post-guard is selected without bun (a default-on redaction guard is never
+    # shipped silently disabled).
+    local bun_bin; bun_bin="$(command -v bun)"
+    place_file "$CONFIG_SRC/hooks/post-guard.ts" "$config_dir/hooks" +x
+    # PostToolUse, on the tool's OUTPUT rather than its input — the other guards above
+    # are all PreToolUse. Register with bun's ABSOLUTE path (same two-token quoted shape
+    # as the other bun hooks): both tokens shq()-quoted so spaces/metachars/quotes don't split.
+    add="$(jq --arg cmd "$(shq "$bun_bin") $cqd/hooks/post-guard.ts" \
+      '.hooks.PostToolUse += [{matcher:"WebFetch|WebSearch|Read|mcp__.*",hooks:[{type:"command",command:$cmd}]}]' <<<"$add")"
+    ok "post-guard enabled (bun: $bun_bin)"
   fi
   if is_selected prompt-guard "$_sel_ids"; then
     # bun is guaranteed present here — the hard-dependency gate above aborts the install

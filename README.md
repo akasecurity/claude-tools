@@ -30,7 +30,7 @@ adds the guardrails for the obvious foot-guns:
 - **Secrets leaving in a web request** → matched on your machine and blocked.
 - **Context filling with noise** (chatty command output) → summarized before it reaches the model.
 
-Eighteen small pieces, ten on by default and eight opt-in. Each stands alone. Take what you want.
+Nineteen small pieces, eleven on by default and eight opt-in. Each stands alone. Take what you want.
 
 **claude-tools is safe defaults for the harness; [ai-tc](https://github.com/akasecurity/ai-tc) is the detection engine.** The secret scan here is a shallow fallback — pattern and key-shape matching on egress. It does not detect PII, PHI, or cardholder data, and it does not redact. When you need deep content detection with an audit trail, add ai-tc; the installer offers it. The two compose: posture from claude-tools, detection from ai-tc.
 
@@ -120,7 +120,7 @@ A guard you haven't watched fire is one you're only assuming works. Launch the p
 
 <p align="center"><img src="media/whats-inside.svg" alt="What's inside: additions grouped by what they do (graphic not yet refreshed for this release's count)." width="100%"></p>
 
-Eighteen additions; the menu is driven entirely by
+Nineteen additions; the menu is driven entirely by
 [`config/additions.json`](config/additions.json), the single source both install paths read.
 Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.pdf).
 
@@ -131,6 +131,7 @@ Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.
 | `leak-guard` | Scans what the agent sends to the web and blocks anything shaped like a secret. Scanned locally, nothing uploaded to check it. | ● on |
 | `command-guard` | Blocks `curl…\|bash`, edits to your shell startup files, and credentials being shipped out. An opt-in `CT_TRUSTED_BOOTSTRAP_URLS` allowlist can exempt specific installer-script URLs from the `curl\|bash` block (see [Configuring the opt-in env keys](#configuring-the-opt-in-env-keys) below). | ● on |
 | `mcp-guard` | Applies your MCP server allow/deny lists (`CT_MCP_ALLOW` / `CT_MCP_DENY`) and blocks MCP tool inputs carrying anything shaped like a secret. It runs on every MCP call, so it checks key shapes and your org markers only; trufflehog stays on the Bash and web egress guards, for latency. The plugin install scans only; the lists come with the full kit. | ● on |
+| `post-guard` | Redacts anything shaped like a secret from what a file read, a web fetch, a web search, or an MCP tool call returns, rewriting the output before the model sees it — a PostToolUse hook, so it rewrites rather than blocks. Also warns (never blocks) when fetched, searched, or MCP-returned content carries a prompt-injection phrase like "ignore previous instructions". Non-text MCP content (images, resources) is never scanned. | ● on |
 | `prompt-guard` | Scans what YOU just typed, not a tool call: prompt-injection phrasing, a credential paired with a send/upload instruction, and encoded blobs that decode to a shell command. Warns only — never blocks, never edits your prompt, never adds anything to the model's context. | ○ opt-in |
 | `rtk-safe` | Compresses supported standalone commands, including `grep`/`rg` — native flags, exit codes and regex dialect are preserved, but long result sets are **summarised**: you get the first ~25 matches plus an exact count of what was hidden and a `rtk recall` handle to retrieve it. Requires stable [`rtk`](https://github.com/rtk-ai/rtk) ≥ 0.49.0; otherwise leaves commands unchanged. Leaves `head`, `-h`/`--help`, and anything with a shell operator or substitution untouched, and preserves project scripts and interpreter selection. `rg`'s auto-approval requires `command-guard`. | ● on |
 | `statusline` | A status bar with live context-fill and rate-limit gauges. | ● on |

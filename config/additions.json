@@ -51,6 +51,16 @@
       "usesConfig": true
     },
     {
+      "id": "post-guard",
+      "name": "post-guard",
+      "prompt": "post-guard: redact secrets from tool output + warn on prompt-injection markers before the model sees them [bun]?",
+      "recommended": true,
+      "description": "PostToolUse guard on Read, WebFetch, WebSearch and every MCP tool's (mcp__*) OUTPUT, not its input. Redacts credential-shaped values (the same shared pattern set as command-guard/leak-guard/mcp-guard) from a file read, a fetched page, a search result, or an MCP tool's returned content, rewriting the tool's output before the model ever sees it. A PostToolUse hook can't block a call that already ran, so this addition never denies anything; it either rewrites the output or passes it through unchanged. Also warns (stderr only, never a block) when fetched, searched, or MCP-returned content contains a prompt-injection phrasing marker (\"ignore previous instructions\", …) — content the agent didn't author and should treat as untrusted data. Non-text MCP content blocks (image, resource, …) are never scanned and pass through untouched. Requires bun, a hard dependency: selecting post-guard aborts the install if bun is absent, rather than shipping a default-on redaction guard silently disabled. When ai-tc is installed and its own PostToolUse hook already covers a tool (Read and WebFetch under Claude Code), this addition defers redaction to it for that tool; WebSearch and mcp__* are never covered there, and the injection-marker warning always runs regardless.",
+      "hook": "hooks/post-guard.ts",
+      "matcher": "WebFetch|WebSearch|Read|mcp__.*",
+      "event": "PostToolUse"
+    },
+    {
       "id": "prompt-guard",
       "name": "prompt-guard",
       "prompt": "prompt-guard: warn (never block) on prompt-injection phrasing, credential exfil pairing, and encoded shell blobs in what YOU type [bun]?",
