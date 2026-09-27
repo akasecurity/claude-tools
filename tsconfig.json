@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["config/hooks/*.ts", "shared/lib/*.ts", "tests/*.test.ts"]
+  "include": ["config/hooks/*.ts", "config/hooks/lib/*.ts", "shared/lib/*.ts", "tests/*.test.ts"]
 }

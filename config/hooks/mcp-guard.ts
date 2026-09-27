@@ -157,6 +157,18 @@ function profileRoots(): string[] {
   return [join(homedir(), '.claude')];
 }
 
+// True when THIS FILE is running from a Claude Code plugin install path
+// (…/plugins/cache/<marketplace>/<name>/<version>/hooks/…). Independent of
+// profileRoots(): CLAUDE_CONFIG_DIR is checked FIRST there, so a plugin copy
+// invoked inside a profile that ALSO has the full kit installed (a real
+// .aka-claude-tools-meta) would otherwise resolve to that real profile and
+// double-log every decision alongside that profile's own hooks. Audit logging is
+// disabled outright for a plugin install, never left to depend on whether the
+// active profile happens to carry a meta file.
+function isPluginInstall(): boolean {
+  return dirname(fileURLToPath(import.meta.url)).includes('/plugins/');
+}
+
 // guard-core missing, unreadable, incompatible, throwing or malformed: fail closed.
 function coreUnavailable(): never {
   console.error(CORE_MISSING_MSG);
@@ -191,22 +203,29 @@ async function main(): Promise<void> {
     coreUnavailable();
   }
 
-  // ai-tc detection only ever turns scanning off; if it throws, scan (the safe direction).
+  // ai-tc detection only ever turns scanning off; if it throws, scan (the safe
+  // direction) and default the audit log on too (more visibility, never less).
   let scanSecrets = true;
+  let auditLog = true;
   try {
-    scanSecrets = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots(), ...projectOpt(input) }))
-      .scanSecrets(tool) !== false;
-  } catch { scanSecrets = true; }
+    const aitcPolicy = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots(), ...projectOpt(input) }));
+    scanSecrets = aitcPolicy.scanSecrets(tool) !== false;
+    auditLog = aitcPolicy.auditLog !== false;
+  } catch { scanSecrets = true; auditLog = true; }
 
   const { policy, warnings } = loadPolicy();
   for (const w of warnings) console.error(w);
 
+  // parsePatterns() is called INSIDE this try (not hoisted above it): a throw here must
+  // still route to coreUnavailable() below, same as a throw from evaluateMcpInput itself.
+  let patterns: ReturnType<Core['parsePatterns']>;
   let d: ReturnType<Core['evaluateMcpInput']>;
   let server: string;
   try {
+    patterns = core.parsePatterns(loadPatternsRaw());
     server = core.mcpServerOf(tool) ?? '';
     d = core.evaluateMcpInput(tool, input.tool_input, {
-      patterns: core.parsePatterns(loadPatternsRaw()),
+      patterns,
       // Regex tiers only (key shapes + org markers). mcp-guard runs on every MCP call,
       // so trufflehog's per-call process cost stays on the Bash and web egress guards.
       scanner: () => 'clean',
@@ -226,6 +245,42 @@ async function main(): Promise<void> {
     const line = typeof code === 'string' ? NOTICE_MSG[code] : undefined;
     if (line) console.error(P + line);
   }
+
+  // Local security-event audit log (opt-out via ai-tc's presence, see lib/audit.ts).
+  // Best effort: loaded lazily so a broken audit.ts can never break the fail-closed
+  // contract above, and wrapped so it never changes the decision or exit code.
+  // Only a LEVEL:'ALERT' notice is audit-worthy (same as command-guard/leak-guard) —
+  // mcp-guard's own operational warnings (org-stale, org-pattern-invalid) are
+  // guard-health notices, not security events, and are already surfaced on stderr.
+  try {
+    const { appendAudit } = await import('./lib/audit.ts');
+    const alert = (d.notices as { level?: unknown; code?: unknown; message?: unknown }[])
+      .find((n) => n && typeof n === 'object' && n.level === 'alert');
+    // The tool input is redacted/capped by formatAuditLine same as any other
+    // free-text field; JSON.stringify first so an object/array snippet reads as
+    // a scannable string rather than "[object Object]".
+    let snippet: string | undefined;
+    try { snippet = JSON.stringify(input.tool_input); } catch { snippet = undefined; }
+    const profileRoot = profileRoots()[0] ?? null;
+    const enabled = auditLog && !isPluginInstall();
+    if (d.kind === 'block') {
+      appendAudit(
+        { hook: 'mcp-guard', tool, kind: 'block', rule: d.rule, snippet },
+        { profileRoot, enabled, patterns },
+      );
+    } else if (alert) {
+      appendAudit(
+        {
+          hook: 'mcp-guard', tool, kind: 'alert',
+          rule: typeof alert.code === 'string' ? alert.code : undefined,
+          detail: typeof alert.message === 'string' ? alert.message : undefined,
+          snippet,
+        },
+        { profileRoot, enabled, patterns },
+      );
+    }
+  } catch { /* audit logging must never affect the decision */ }
+
   if (d.kind === 'block') {
     const msg = BLOCK_MSG[d.rule] as ((s: string) => string) | undefined;
     console.error(P + (msg ? msg(server) : `blocked — ${typeof d.reason === 'string' ? d.reason : 'unrecognised guard-core rule.'}`));

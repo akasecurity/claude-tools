@@ -179,6 +179,18 @@ function profileRoots(): string[] {
   return [join(homedir(), '.claude')];
 }
 
+// True when THIS FILE is running from a Claude Code plugin install path
+// (…/plugins/cache/<marketplace>/<name>/<version>/hooks/…). Independent of
+// profileRoots(): CLAUDE_CONFIG_DIR is checked FIRST there, so a plugin copy
+// invoked inside a profile that ALSO has the full kit installed (a real
+// .aka-claude-tools-meta) would otherwise resolve to that real profile and
+// double-log every decision alongside that profile's own hooks. Audit logging is
+// disabled outright for a plugin install, never left to depend on whether the
+// active profile happens to carry a meta file.
+function isPluginInstall(): boolean {
+  return dirname(fileURLToPath(import.meta.url)).includes('/plugins/');
+}
+
 // guard-core missing, unreadable, incompatible or throwing: keep the structural blocks via
 // the raw regexes, fail closed on outbound-looking commands, allow the rest loudly.
 function coreUnavailable(command: string): never {
@@ -225,12 +237,15 @@ async function main(): Promise<void> {
     coreUnavailable(command);
   }
 
-  // ai-tc detection only ever turns scanning off; if it throws, scan (the safe direction).
+  // ai-tc detection only ever turns scanning off; if it throws, scan (the safe
+  // direction) and default the audit log on too (more visibility, never less).
   let scanSecrets = true;
+  let auditLog = true;
   try {
-    scanSecrets = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots(), ...projectOpt(input) }))
-      .scanSecrets('Bash') !== false;
-  } catch { scanSecrets = true; }
+    const policy = core.coexistencePolicy(core.detectAitc('claude', { home: homedir(), roots: profileRoots(), ...projectOpt(input) }));
+    scanSecrets = policy.scanSecrets('Bash') !== false;
+    auditLog = policy.auditLog !== false;
+  } catch { scanSecrets = true; auditLog = true; }
 
   // Only a pipe-bearing command can possibly match the bootstrap exemption (it's exactly
   // `curl ... | bash|sh`), so the sidecar read is skipped entirely on every other Bash call.
@@ -241,10 +256,14 @@ async function main(): Promise<void> {
     if (tb.warn) console.error(P + tb.warn);
   }
 
+  // parsePatterns() is called INSIDE this try (not hoisted above it): a throw here must
+  // still route to coreUnavailable() below, same as a throw from evaluateBash itself.
+  let patterns: ReturnType<Core['parsePatterns']>;
   let d: ReturnType<Core['evaluateBash']>;
   try {
+    patterns = core.parsePatterns(loadPatternsRaw());
     d = core.evaluateBash(command, {
-      patterns: core.parsePatterns(loadPatternsRaw()),
+      patterns,
       org: loadOrgTier(),
       scanSecrets,
       trustedBootstrap,
@@ -267,6 +286,35 @@ async function main(): Promise<void> {
       if (line) console.error(P + line);
     } catch { /* a malformed notice never changes the decision */ }
   }
+
+  // Local security-event audit log (opt-out via ai-tc's presence, see lib/audit.ts).
+  // Best effort: loaded lazily so a broken audit.ts can never break the fail-
+  // open/fail-closed contract above, and wrapped so it never changes the decision
+  // or exit code. Runs AFTER the decision is final, BEFORE process.exit below.
+  try {
+    const { appendAudit } = await import('./lib/audit.ts');
+    const alert = (d.notices as { level?: unknown; code?: unknown; message?: unknown }[])
+      .find((n) => n && typeof n === 'object' && n.level === 'alert');
+    const profileRoot = profileRoots()[0] ?? null;
+    const enabled = auditLog && !isPluginInstall();
+    if (d.kind === 'block') {
+      appendAudit(
+        { hook: 'command-guard', tool: 'Bash', kind: 'block', rule: d.rule, snippet: command },
+        { profileRoot, enabled, patterns },
+      );
+    } else if (alert) {
+      appendAudit(
+        {
+          hook: 'command-guard', tool: 'Bash', kind: 'alert',
+          rule: typeof alert.code === 'string' ? alert.code : undefined,
+          detail: typeof alert.message === 'string' ? alert.message : undefined,
+          snippet: command,
+        },
+        { profileRoot, enabled, patterns },
+      );
+    }
+  } catch { /* audit logging must never affect the decision */ }
+
   if (d.kind === 'block') {
     let line = '🚨 BLOCKED (command-guard): unrecognised guard-core rule.';
     try {

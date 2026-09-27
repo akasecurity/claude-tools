@@ -4,23 +4,28 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 OUT="plugins/claude-tools"; HK="$OUT/hooks"
-BUNDLED="command-guard leak-guard mcp-guard"   # guard hooks the plugin ships (recommended, runtime=bun)
+BUNDLED="command-guard leak-guard mcp-guard post-guard"   # guard hooks the plugin ships (recommended, runtime=bun)
 rm -rf "$OUT"; mkdir -p "$OUT/.claude-plugin" "$HK"
 
 # manifest
 jq -n --arg v "$(cat VERSION)" '{
   name:"claude-tools", version:$v, author:{name:"AKA Security"},
   homepage:"https://akasecurity.io", repository:"https://github.com/akasecurity/claude-tools",
-  description:"AKA Claude Tools guard hooks (command-guard, leak-guard, mcp-guard) for your active profile. Requires bun. If bun is missing, the guards fail OPEN (the tool call proceeds) and announce themselves inactive at session start; with bun present, mcp-guard blocks on its own errors. For the full hardened ISOLATED profile (credential-read denies, rtk-safe permission allowlist, status line, alias), install the full kit — see the project README for npm, Homebrew, and installer options."
+  description:"AKA Claude Tools guard hooks (command-guard, leak-guard, mcp-guard, post-guard) for your active profile. Requires bun. If bun is missing, the guards fail OPEN (the tool call proceeds) and announce themselves inactive at session start; with bun present, mcp-guard blocks on its own errors. For the full hardened ISOLATED profile (credential-read denies, rtk-safe permission allowlist, status line, alias), install the full kit — see the project README for npm, Homebrew, and installer options."
 }' > "$OUT/.claude-plugin/plugin.json"
 
 # copy launcher + preflight + shared lib (secret-patterns.json for defense-in-depth,
-# plus the vendored guard-core every bundled guard hook runs on)
+# the vendored guard-core every bundled guard hook runs on, and audit.ts — the local
+# security-event audit log the guard hooks call; each hook's own isPluginInstall()
+# check forces audit logging off outright for a /plugins/ install path, even when it
+# happens to run inside a profile that DOES have a real .aka-claude-tools-meta, so
+# audit.ts is copied here for completeness but writes nothing from this build)
 install -m 0755 config/hooks/bun-hook-launch.sh config/hooks/preflight.sh "$HK"/
-mkdir -p "$HK/lib" && cp config/hooks/lib/secret-patterns.json config/hooks/lib/guard-core.js "$HK/lib/"
+mkdir -p "$HK/lib" && cp config/hooks/lib/secret-patterns.json config/hooks/lib/guard-core.js \
+  config/hooks/lib/audit.ts "$HK/lib/"
 
 # copy each bundled guard + build its hooks.json entry from additions.json
-hooks='{"hooks":{"PreToolUse":[],"SessionStart":[]}}'
+hooks='{"hooks":{"PreToolUse":[],"PostToolUse":[],"SessionStart":[]}}'
 for id in $BUNDLED; do
   hookpath="$(jq -r --arg id "$id" '.additions[]|select(.id==$id).hook' config/additions.json)"
   matcher="$(jq -r --arg id "$id" '.additions[]|select(.id==$id).matcher' config/additions.json)"

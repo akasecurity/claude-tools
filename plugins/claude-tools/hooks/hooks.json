@@ -29,6 +29,17 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "WebFetch|WebSearch|Read|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/bun-hook-launch.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/post-guard.ts\""
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [

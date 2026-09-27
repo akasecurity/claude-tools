@@ -18,6 +18,42 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   unknown ids, so drop `secure-research` from any saved `CT_ADDITIONS` list.
 
 ### Added
+- **`post-guard`**: a new PostToolUse guard on `Read`, `WebFetch`, `WebSearch`, and every
+  MCP tool's output (`mcp__*`), on by default. Redacts anything shaped like a secret from
+  a file read, a fetched page, a search result, or an MCP tool's returned content,
+  rewriting the tool's output before the model ever sees it — a PostToolUse hook can't
+  block a call that already ran, so this only rewrites or passes through unchanged, never
+  denies. Also warns, via Claude Code's `systemMessage` channel, never a block, when
+  fetched, searched, or MCP-returned content carries a prompt-injection phrase ("ignore
+  previous instructions", …), since that's content the agent didn't author and should
+  treat as untrusted data; the same warning is also passed to the model itself as
+  additional context. An MCP resource block's own text is scanned and redacted like any
+  other text content; only image data and a resource's binary blob field are never
+  scanned. Requires `bun`, a hard
+  dependency like the other bun-based guards. Defers to ai-tc for `Read` and `WebFetch`
+  when ai-tc already covers those tools in the profile; `WebSearch`, `mcp__*`, and the
+  injection-marker warning always run regardless.
+- **Local security-event audit log**: `command-guard`, `leak-guard`, `mcp-guard`, and
+  `prompt-guard` now each write one redacted, capped JSON line per block, alert, or
+  prompt-injection notice to `<profile>/logs/security-<YYYY-MM>.jsonl` (one file per UTC
+  month, `logs/` at mode `0700`, each file at `0600`). A new read-only
+  `./install.sh --audit-log [--month YYYY-MM] [PROFILE_DIR]` mode prints counts by kind
+  and rule, then the last 20 events, re-rendered through the same redaction pass on read.
+  Writing the log never changes a guard's decision; a write failure is swallowed silently.
+  Off entirely when ai-tc is present for the profile — ai-tc keeps its own audit trail.
+- **Integrity manifest, a `SessionStart` drift check, and `--audit`**: the installer now
+  writes `<profile>/.aka-integrity.json` (a sha256 of every kit-managed hook, library
+  file, and launcher shim, plus a hash of the kit-managed slice of `settings.json`) at
+  the end of every apply. An internal `SessionStart` hook — not a selectable addition, it
+  rides alongside any other bun-based hook — re-checks the profile against that manifest
+  on every launch, resume, clear, compact, and fork, and prints one stderr line naming
+  how many kit files changed or went missing and whether settings drifted, pointing at
+  `aka-claude-tools --audit` for detail. The new read-only `./install.sh --audit
+  [PROFILE_DIR]` mode lists exactly what changed, went missing, or turned up unexpected,
+  names the specific kit-managed setting that drifted, and warns separately when
+  `disableAllHooks` or `permissions.defaultMode: "bypassPermissions"` is set. Detection,
+  not a boundary: anything able to rewrite a kit file can rewrite the manifest alongside
+  it. Never blocks; fails silent on its own internal error; runs regardless of ai-tc.
 - **`mcp-guard`**: a new PreToolUse guard on every MCP tool call (`mcp__*`), on by default.
   Applies an MCP server allow/deny policy first (`CT_MCP_DENY` blocks named servers; a
   non-empty `CT_MCP_ALLOW` blocks every server not on it, both case-insensitive, compiled

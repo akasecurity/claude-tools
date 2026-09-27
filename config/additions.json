@@ -1,5 +1,5 @@
 {
-  "$comment": "Catalog of selectable aka-claude-tools additions. Drives the installer menu and documents the payload. 'recommended' additions are pre-selected at the install prompt.",
+  "$comment": "Catalog of selectable aka-claude-tools additions. Drives the installer menu and documents the payload. 'recommended' additions are pre-selected at the install prompt. Not listed here on purpose: hooks/integrity-check.ts, an internal SessionStart hook (like the plugin's preflight.sh) that install.sh places with any bun hook and removes with the last one; it checks the profile against the .aka-integrity.json manifest the installer writes.",
   "additions": [
     {
       "id": "secure-settings",
@@ -49,6 +49,16 @@
       "matcher": "mcp__.*",
       "event": "PreToolUse",
       "usesConfig": true
+    },
+    {
+      "id": "post-guard",
+      "name": "post-guard",
+      "prompt": "post-guard: redact secrets from tool output + warn on prompt-injection markers before the model sees them [bun]?",
+      "recommended": true,
+      "description": "PostToolUse guard on Read, WebFetch, WebSearch and every MCP tool's (mcp__*) OUTPUT, not its input. Redacts credential-shaped values (the same shared pattern set as command-guard/leak-guard/mcp-guard) from a file read, a fetched page, a search result, or an MCP tool's returned content, rewriting the tool's output before the model ever sees it. A PostToolUse hook can't block a call that already ran, so this addition never denies anything; it either rewrites the output or passes it through unchanged. Also warns (via Claude Code's systemMessage channel, never a block) when fetched, searched, or MCP-returned content contains a prompt-injection phrasing marker (\"ignore previous instructions\", …) — content the agent didn't author and should treat as untrusted data; the same warning is also passed to the model itself as additional context. An MCP resource block's own text is scanned and redacted like any other text content; only an image block's data and a resource's binary blob field are never scanned and pass through untouched. Requires bun, a hard dependency: selecting post-guard aborts the install if bun is absent, rather than shipping a default-on redaction guard silently disabled. When ai-tc is installed and its own PostToolUse hook already covers a tool (Read and WebFetch under Claude Code), this addition defers redaction to it for that tool; WebSearch and mcp__* are never covered there, and the injection-marker warning always runs regardless.",
+      "hook": "hooks/post-guard.ts",
+      "matcher": "WebFetch|WebSearch|Read|mcp__.*",
+      "event": "PostToolUse"
     },
     {
       "id": "prompt-guard",

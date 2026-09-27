@@ -98,16 +98,27 @@ if (!Bun.which('rtk')) {
   process.exit(1);
 }
 
+// Every case here is captured with the hooks running from a bare `hooks/` dir with
+// no `.aka-claude-tools-meta` sibling — the audit log (lib/audit.ts) must write
+// NOTHING in that shape (see appendAudit's meta-file gate). That already holds by
+// construction, but ONLY if the spawned hook resolves its profile root from ITS
+// OWN location rather than an inherited CLAUDE_CONFIG_DIR — an operator (or CI
+// runner) capturing golden from inside an active `claude-aka`-style session would
+// otherwise leak real profile writes into this run. Strip it defensively, the same
+// way tests/lib.sh does for the bash test suite.
+const baseEnv = { ...process.env };
+delete baseEnv.CLAUDE_CONFIG_DIR;
+
 const out = cases.map((c) => {
   const { dir, cleanup } = hooksDirFor(c);
   const r = Bun.spawnSync([process.execPath, join(dir, `${c.hook}.ts`)], {
     stdin: new TextEncoder().encode(c.raw ?? JSON.stringify(c.input)),
     env: {
-      ...process.env,
+      ...baseEnv,
       PATH: c.env === 'trufflehog-hit' ? pathTrufflehogHit
         : c.env === 'notrufflehog' || c.env === 'patterns-missing' || c.env === 'org'
           || c.env === 'mcp-policy' || c.env === 'core-missing' || c.env === 'bootstrap' ? pathNoTruffle
-        : process.env.PATH,
+        : baseEnv.PATH,
     },
   });
   cleanup();

@@ -59,8 +59,9 @@ for cat in skills hooks commands workflows; do
     [ -e "$entry" ] || continue
     # Shared support dirs + plugin-build assets back the additions but aren't deployable
     # additions themselves (lib = secret-patterns corpus; bun-hook-launch.sh + preflight.sh
-    # = plugin-only scripts consumed by tools/build-plugin.sh). Skip them.
-    case "$(basename "$entry")" in lib|bun-hook-launch.sh|preflight.sh) continue ;; esac
+    # = plugin-only scripts consumed by tools/build-plugin.sh; integrity-check.ts = an
+    # internal hook install.sh places with any bun hook). Skip them.
+    case "$(basename "$entry")" in lib|bun-hook-launch.sh|preflight.sh|integrity-check.ts) continue ;; esac
     rel="$cat/$(basename "$entry")"
     if printf '%s\n' "$declared" | grep -qxF "$rel"; then
       pass "shipped file is declared: $rel"

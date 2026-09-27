@@ -1,0 +1,23 @@
+{
+  "session_id": "example-session-id",
+  "transcript_path": "/tmp/example/transcript.jsonl",
+  "cwd": "/tmp/example",
+  "prompt_id": "example-prompt-id",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "WebFetch",
+  "tool_input": {
+    "url": "https://example.com",
+    "prompt": "What is the page title?"
+  },
+  "tool_response": {
+    "bytes": 559,
+    "code": 200,
+    "codeText": "OK",
+    "result": "The page title is \"Example Domain.\"\n\nThis is example summary text produced from the fetched page, standing in for real fetched content.",
+    "durationMs": 1729,
+    "url": "https://example.com"
+  },
+  "tool_use_id": "example-tool-use-id",
+  "duration_ms": 1729
+}
