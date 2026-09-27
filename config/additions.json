@@ -1,5 +1,5 @@
 {
-  "$comment": "Catalog of selectable aka-claude-tools additions. Drives the installer menu and documents the payload. 'recommended' additions are pre-selected at the install prompt.",
+  "$comment": "Catalog of selectable aka-claude-tools additions. Drives the installer menu and documents the payload. 'recommended' additions are pre-selected at the install prompt. Not listed here on purpose: hooks/integrity-check.ts, an internal SessionStart hook (like the plugin's preflight.sh) that install.sh places with any bun hook and removes with the last one; it checks the profile against the .aka-integrity.json manifest the installer writes.",
   "additions": [
     {
       "id": "secure-settings",

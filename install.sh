@@ -91,6 +91,15 @@
 #                      dies with a clear message if it's missing). Never writes
 #                      anything — the writer is lib/audit.ts, called from the
 #                      guard hooks, never from this script.
+#   --audit [PROFILE_DIR]
+#                      READ-ONLY: check one profile against the integrity manifest
+#                      the installer wrote (<profile>/.aka-integrity.json). Lists kit
+#                      files under hooks/ and bin/ that changed or went missing, any
+#                      file under hooks/lib/ the manifest doesn't list, and kit-managed
+#                      settings (hook registrations, shipped deny rules, sandbox,
+#                      statusLine) that are missing or changed, then suggests
+#                      re-running the installer. Exits 0 when nothing differs, 1 on
+#                      any drift. Same profile resolution as --audit-log.
 
 set -euo pipefail
 
@@ -114,14 +123,18 @@ CT_AUDIT_LOG_MODE=0
 CT_AUDIT_MONTH="${CT_AUDIT_MONTH:-}"
 # `--audit-log [--month YYYY-MM] [PROFILE_DIR]` also accepts an optional positional
 # profile path (an alternative to CT_CONFIG_DIR, which still works — see
-# audit_log_entry). Captured ONLY when --audit-log is present ANYWHERE in "$@" —
+# audit_log_entry). Captured ONLY when --audit-log or --audit is present ANYWHERE in "$@" —
 # checked via this pre-scan, not the (not-yet-set) $CT_AUDIT_LOG_MODE inside the
 # single pass below, since --audit-log can appear AFTER the positional in
 # invocation order. Every other mode keeps the previous handling of an unknown
 # arg: silently ignored, never captured.
+# `--audit [PROFILE_DIR]` takes the same optional positional, captured the same way.
+CT_AUDIT_MODE=0
 CT_AUDIT_PROFILE_ARG=""
 _audit_log_requested=0
-for _a in "$@"; do [ "$_a" = "--audit-log" ] && { _audit_log_requested=1; break; }; done
+for _a in "$@"; do
+  case "$_a" in --audit-log|--audit) _audit_log_requested=1; break ;; esac
+done
 # `--month YYYY-MM` takes a value; a plain `for arg in "$@"` can't peek the next
 # token, so track "the previous arg was --month" across iterations instead.
 _prev_flag=""
@@ -138,6 +151,7 @@ for arg in "$@"; do
     --delete-alias)    CT_DELETE_ALIAS=1; export CT_NONINTERACTIVE=1 ;;
     --enumerate)       CT_ENUMERATE=1; export CT_NONINTERACTIVE=1 ;;
     --audit-log)       CT_AUDIT_LOG_MODE=1; export CT_NONINTERACTIVE=1 ;;
+    --audit)           CT_AUDIT_MODE=1; export CT_NONINTERACTIVE=1 ;;
     --month)           _prev_flag="--month" ;;
     *)                 [ "$_audit_log_requested" = "1" ] && CT_AUDIT_PROFILE_ARG="$arg" ;;
   esac
@@ -150,7 +164,7 @@ ensure_dep jq "jq (required)" 1
 # The claude-CLI check and the banner are installer chrome — skip them in --apply
 # (engine) mode, which is invoked programmatically and only needs jq.
 if [ "$CT_APPLY" != "1" ] && [ "$CT_ALIAS_MODE" != "1" ] && [ "$CT_DELETE_ALIAS" != "1" ] \
-   && [ "$CT_ENUMERATE" != "1" ] && [ "$CT_AUDIT_LOG_MODE" != "1" ]; then
+   && [ "$CT_ENUMERATE" != "1" ] && [ "$CT_AUDIT_LOG_MODE" != "1" ] && [ "$CT_AUDIT_MODE" != "1" ]; then
   command -v claude >/dev/null 2>&1 || warn "claude CLI not found on PATH — the alias will still be written, but install Claude Code to use it."
   # bun (the guard hooks) and trufflehog (the secret scans) are checked/offered when those
   # additions are selected — see the build step below.
@@ -652,6 +666,7 @@ write_launcher_shim() {
     "$AKA_SHIM_MARKER" "$config_dir" > "$shim" \
     || die "Cannot write the launcher shim at ${shim} — your shell rc was NOT modified."
   chmod +x "$shim" || die "Cannot make ${shim} executable — your shell rc was NOT modified."
+  integrity_refresh_bin "$config_dir"
 }
 
 # launcher_path_representable <config_dir> — PATH is colon-delimited, so a config
@@ -752,6 +767,7 @@ write_deprecated_shim() {
     printf 'exec "%s/bin/%s" "$@"\n' "$config_dir" "$new"
   } > "$shim" || die "Cannot write the launcher shim at ${shim} — your shell rc was NOT modified."
   chmod +x "$shim" || die "Cannot make ${shim} executable — your shell rc was NOT modified."
+  integrity_refresh_bin "$config_dir"
 }
 
 # deprecated_block_content <config_dir> <old> <new> — the forwarder's managed rc block
@@ -1309,6 +1325,100 @@ meta_get() {
   { grep -E "^${2}=" "$f" 2>/dev/null || true; } | tail -1 | cut -d= -f2-
 }
 
+# ── integrity manifest ───────────────────────────────────────────────────────
+# <profile>/.aka-integrity.json records what the kit placed, so hooks/integrity-check.ts
+# (at session start) and `--audit` (on demand) can tell when a kit file or a kit-managed
+# setting has drifted — most usefully, when a tool call rewrote a hook or a sidecar:
+#
+#   { version: 1,
+#     files:    { "<relpath>": "<sha256>" },   kit files under hooks/ and bin/
+#     settings: "<sha256>",                    sha256 of the kit-managed settings subset
+#     kit:      { deny, sandbox, statusLine } } inputs the subset needs besides settings.json
+#
+# The subset itself is defined once, in hooks/lib/managed-settings.jq; this script and
+# the hook both run it through `jq -S -c` and hash the output, so they agree byte for
+# byte. Detection only: anything able to rewrite the manifest can hide its own changes.
+
+# integrity_kit_files <config_dir> → profile-relative paths, one per line: every
+# managed-marker hook directly under hooks/, every file under hooks/lib/ (the kit owns
+# that dir outright — place_dir replaces it wholesale), and every marked launcher shim
+# under bin/.
+integrity_kit_files() {
+  local d="$1" f
+  for f in "$d"/hooks/*; do
+    [ -f "$f" ] && grep -q 'aka-claude-tools:managed-hook' "$f" 2>/dev/null && printf 'hooks/%s\n' "${f##*/}"
+  done
+  [ -d "$d/hooks/lib" ] && ( cd "$d" && find hooks/lib -type f | LC_ALL=C sort )
+  for f in "$d"/bin/*; do
+    [ -f "$f" ] && grep -qF "$AKA_SHIM_MARKER" "$f" 2>/dev/null && printf 'bin/%s\n' "${f##*/}"
+  done
+  return 0
+}
+
+# integrity_hash_files <config_dir> [prefix] → JSON object {relpath: sha256} for the
+# kit files (optionally only those whose relpath starts with <prefix>).
+integrity_hash_files() {
+  local d="$1" prefix="${2:-}" rel h
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    case "$rel" in "$prefix"*) ;; *) continue ;; esac
+    h="$(sha256_file "$d/$rel")" || return 1
+    jq -nc --arg k "$rel" --arg v "$h" '{($k): $v}'
+  done < <(integrity_kit_files "$d") | jq -sc 'add // {}'
+}
+
+# integrity_settings_hash <config_dir> <manifest-json> → sha256 of the kit-managed
+# settings subset (see managed-settings.jq), computed exactly as integrity-check.ts
+# does: settings.json (or {} when absent) through `jq -S -c`, then the output hashed.
+# Uses the profile's own copy of the program when it has one, else this checkout's.
+integrity_settings_hash() {
+  local d="$1" m="$2" prog real roots out
+  prog="$d/hooks/lib/managed-settings.jq"
+  [ -f "$prog" ] || prog="$CONFIG_SRC/hooks/lib/managed-settings.jq"
+  real="$(cd "$d" && pwd -P)" || real="$d"
+  roots="$(jq -nc --arg a "$d" --arg b "$real" '[$a, $b] | unique')"
+  out="$(mktemp)"
+  if { if [ -f "$d/settings.json" ]; then cat "$d/settings.json"; else printf '{}'; fi; } \
+       | jq -S -c --argjson m "$m" --arg home "$HOME" --argjson roots "$roots" -f "$prog" > "$out" 2>/dev/null; then
+    sha256_file "$out"; rm -f "$out"
+  else
+    rm -f "$out"; return 1
+  fi
+}
+
+# write_integrity_manifest <config_dir> <kit-json> — (re)write the whole manifest from
+# what is on disk right now. Called at the end of apply_additions, after settings.json
+# and every sidecar are in place.
+write_integrity_manifest() {
+  local d="$1" kit="$2" files m sh tmp
+  files="$(integrity_hash_files "$d")" || { warn "Could not hash the kit files; integrity manifest not written."; return 0; }
+  m="$(jq -nc --argjson f "$files" --argjson k "$kit" '{version: 1, files: $f, kit: $k}')"
+  sh="$(integrity_settings_hash "$d" "$m")" || { warn "Could not hash the kit-managed settings; integrity manifest not written."; return 0; }
+  tmp="$d/.aka-integrity.json.tmp.$$"
+  if jq -n --argjson m "$m" --arg s "$sh" '$m + {settings: $s} | {version, files, settings, kit}' > "$tmp"; then
+    mv -f "$tmp" "$d/.aka-integrity.json"
+  else
+    rm -f "$tmp"
+  fi
+}
+
+# integrity_refresh_bin <config_dir> — after a launcher shim is written or removed,
+# re-record ONLY the bin/ entries. Hooks, lib and the settings hash stay as the last
+# install recorded them, so a shim update never launders drift elsewhere.
+# No manifest yet → nothing to do.
+integrity_refresh_bin() {
+  local d="$1" f="$1/.aka-integrity.json" bin tmp
+  [ -f "$f" ] || return 0
+  bin="$(integrity_hash_files "$d" bin/)" || return 0
+  tmp="$f.tmp.$$"
+  if jq --argjson b "$bin" '.files |= (with_entries(select(.key | startswith("bin/") | not)) + $b)' "$f" > "$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$f"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
 # ── deterministic engine: layer additions onto a config dir ──────────────────
 # apply_additions <config_dir>  — place the selected additions (CT_ADDITIONS) and
 # merge their settings onto whatever already lives in <config_dir> (incl. a
@@ -1394,10 +1504,14 @@ apply_additions() {
   # resolved absolute path, and there is no such path to embed without bun present.
   # ensure_dep offers to install bun first (interactive); it die()s only on decline /
   # non-interactive-absent, so a partial apply is impossible.
+  # _any_bun also gates the always-on integrity-check hook and the shared hooks/lib it
+  # runs from (see the build step below): it rides along with ANY bun hook.
+  local _any_bun=0
   if is_selected command-guard "$_sel_ids" || is_selected leak-guard "$_sel_ids" \
      || is_selected mcp-guard "$_sel_ids" || is_selected post-guard "$_sel_ids" \
      || is_selected prompt-guard "$_sel_ids" \
      || is_selected statusline "$_sel_ids" || is_selected rtk-safe "$_sel_ids"; then
+    _any_bun=1
     ensure_dep bun "bun — required runtime for command-guard, leak-guard, mcp-guard, post-guard, prompt-guard, statusline, and/or rtk-safe" 1
     # Warn ONCE per run (not once per hook below) when the bun about to be baked into
     # every selected hook's absolute path is the one npm installed alongside THIS
@@ -1488,9 +1602,9 @@ apply_additions() {
   # prompt-guard reads the same secret-patterns.json (for its credential-pairing tier)
   # and guard-core.js (scanPrompt, detectAitc), so it's a consumer too — its own missing-
   # patterns/missing-core paths just degrade silently rather than failing closed.
-  if is_selected leak-guard "$_sel_ids" || is_selected command-guard "$_sel_ids" \
-    || is_selected mcp-guard "$_sel_ids" || is_selected post-guard "$_sel_ids" \
-    || is_selected rtk-safe "$_sel_ids" || is_selected prompt-guard "$_sel_ids"; then
+  # integrity-check (installed with any bun hook, statusline included) runs from the
+  # same lib: guard-core, audit.ts and managed-settings.jq. So any bun hook places it.
+  if [ "$_any_bun" = "1" ]; then
     place_dir "$CONFIG_SRC/hooks/lib" "$config_dir/hooks"
   fi
 
@@ -1648,6 +1762,17 @@ apply_additions() {
       fi
     fi
   fi
+  # Self-integrity check. Not a menu addition: like the plugin's preflight it is an
+  # internal hook, always installed alongside any bun hook and removed with the last
+  # one. SessionStart has no tool matcher. At session start it re-hashes the files and
+  # settings recorded in .aka-integrity.json (written at the end of this function)
+  # and prints one notice if anything drifted.
+  if [ "$_any_bun" = "1" ]; then
+    local bun_bin; bun_bin="$(command -v bun)"
+    place_file "$CONFIG_SRC/hooks/integrity-check.ts" "$config_dir/hooks" +x
+    add="$(jq --arg cmd "$(shq "$bun_bin") $cqd/hooks/integrity-check.ts" \
+      '.hooks.SessionStart += [{hooks:[{type:"command",command:$cmd}]}]' <<<"$add")"
+  fi
   if is_selected wrap-up "$_sel_ids"; then
     place_file "$CONFIG_SRC/commands/wrap-up.md" "$config_dir/commands"
   fi
@@ -1749,6 +1874,12 @@ apply_additions() {
     fi
     [ "$_changed" = "1" ] && ok "Uninstalled '${_uid}' — removed its files and settings entries"
   done
+  # integrity-check belongs to no addition, so the loop above never removes it; it goes
+  # with the last bun hook.
+  if [ "$_any_bun" != "1" ]; then
+    rm -f "$config_dir/hooks/integrity-check.ts"
+    [ "$existing" != "{}" ] && existing="$(printf '%s' "$existing" | prune_hook_regs "integrity-check.ts")"
+  fi
 
   # 4d-pre1d. Reconcile the statusLine slot with the current ai-tc state, now that
   # $existing (the on-disk settings.json) is loaded — the 4b build step above can't do
@@ -1862,22 +1993,20 @@ apply_additions() {
     meta_set "$config_dir" sandbox_installed 1
   fi
 
-  # 4d-pre1a. The shared egress-guard libs (hooks/lib/secret-patterns.json, the
-  # compiled hooks/lib/org-egress.json sidecar, and hooks/lib/audit.ts — the local
-  # security-event audit log every one of these four hooks calls) are owned by NO
-  # single addition — they're placed whenever any egress guard (leak-guard,
-  # command-guard, mcp-guard) or prompt-guard (its credential-pairing tier reads
-  # secret-patterns.json too) is selected. The per-addition deselect loop above can't
-  # remove them (no guard's owned-paths list includes them), so deselecting every
-  # guard would orphan them. Remove all three only when NO consumer remains. The
-  # vendored guard-core has a wider consumer set still (every bun guard hook,
-  # including rtk-safe, which never calls appendAudit), so it's cleaned up
-  # separately below — only once NO consumer remains does the now-empty hooks/lib dir
-  # come down.
+  # 4d-pre1a. The shared egress-guard libs (hooks/lib/secret-patterns.json and the
+  # compiled hooks/lib/org-egress.json sidecar) are owned by NO single addition —
+  # they're used by the egress guards (leak-guard, command-guard, mcp-guard) and
+  # prompt-guard (its credential-pairing tier reads secret-patterns.json too). The
+  # per-addition deselect loop above can't remove them (no guard's owned-paths list
+  # includes them), so deselecting every guard would orphan them. Remove both only
+  # when NO consumer remains. The vendored guard-core, hooks/lib/audit.ts (the local
+  # security-event audit log) and hooks/lib/managed-settings.jq have a wider consumer
+  # set still (every bun hook, via integrity-check), so they're cleaned up separately
+  # below — only once NO bun hook remains does the now-empty hooks/lib dir come down.
   if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids" \
     && ! is_selected mcp-guard "$_sel_ids" && ! is_selected prompt-guard "$_sel_ids"; then
     _egress_lib_removed=
-    for _lib in secret-patterns.json org-egress.json audit.ts; do
+    for _lib in secret-patterns.json org-egress.json; do
       if [ -e "$config_dir/hooks/lib/$_lib" ]; then
         rm -f "$config_dir/hooks/lib/$_lib"
         _egress_lib_removed=1
@@ -1900,11 +2029,12 @@ apply_additions() {
     rm -f "$config_dir/hooks/lib/mcp-policy.json"
     ok "Removed MCP policy sidecar (mcp-guard not selected)"
   fi
-  if ! is_selected leak-guard "$_sel_ids" && ! is_selected command-guard "$_sel_ids" \
-    && ! is_selected mcp-guard "$_sel_ids" && ! is_selected rtk-safe "$_sel_ids" \
-    && ! is_selected prompt-guard "$_sel_ids"; then
+  # guard-core, audit.ts and managed-settings.jq serve every bun hook (integrity-check
+  # included), so they go only with the last one.
+  if [ "$_any_bun" != "1" ]; then
     rm -f "$config_dir/hooks/lib/guard-core.js" "$config_dir/hooks/lib/guard-core.d.ts" \
-      "$config_dir/hooks/lib/guard-core.lock.json"
+      "$config_dir/hooks/lib/guard-core.lock.json" "$config_dir/hooks/lib/audit.ts" \
+      "$config_dir/hooks/lib/managed-settings.jq"
     rmdir "$config_dir/hooks/lib" 2>/dev/null || true
   fi
 
@@ -2026,6 +2156,15 @@ apply_additions() {
   # (e.g. secure-settings + statusline only). Preserves any alias= line --alias wrote.
   meta_set "$config_dir" managed aka-claude-tools
 
+  # Record what the kit just placed, for integrity-check and --audit. The kit-managed
+  # inputs settings.json alone can't show (which deny rules the kit shipped this run,
+  # whether it set the sandbox and the status line) come from `add`, after reconcile.
+  local _kit_params
+  _kit_params="$(jq -c '{deny: ([.permissions.deny // [] | .[] | strings] | unique),
+      sandbox: ((.sandbox.enabled? // false) == true),
+      statusLine: has("statusLine")}' <<<"$add")"
+  write_integrity_manifest "$config_dir" "$_kit_params"
+
   # tidy empty dirs
   rmdir "$config_dir/hooks" "$config_dir/commands" "$config_dir/workflows" 2>/dev/null || true
 }
@@ -2129,6 +2268,7 @@ _remove_marked_shim() {
   elif grep -qF "$AKA_SHIM_MARKER" "$dir/bin/$name"; then
     rm -f "$dir/bin/$name"
     rmdir "$dir/bin" 2>/dev/null || true
+    integrity_refresh_bin "$dir"
     ok "Removed launcher shim ${dir}/bin/${name}"
   fi
 }
@@ -2355,6 +2495,85 @@ audit_log_entry() {
   printf '%s\n' "$sanitized" | tail -n 20
 }
 
+# ── --audit entry: read-only integrity check of one profile ─────────────────────
+# Compares the profile against the .aka-integrity.json the installer wrote (see
+# write_integrity_manifest) and lists every difference: kit files that changed or
+# went missing, files under hooks/lib/ the manifest doesn't list, and kit-managed
+# settings that are missing or changed. The same checks integrity-check.ts runs at
+# session start, spelled out. Profile resolution matches --audit-log: positional
+# PROFILE_DIR, else CT_CONFIG_DIR, else ~/.claude. Exits 0 when nothing differs,
+# 1 on any drift or when there is no manifest to check against.
+integrity_audit_entry() {
+  local config_dir="${CT_AUDIT_PROFILE_ARG:-${CT_CONFIG_DIR:-$HOME/.claude}}"
+  config_dir="${config_dir/#\~/$HOME}"
+  [ "$config_dir" != "/" ] && config_dir="${config_dir%/}"
+  case "$config_dir" in /*) ;; *) config_dir="$PWD/$config_dir" ;; esac
+  local mf="$config_dir/.aka-integrity.json"
+  say "${C_BOLD}Integrity audit${C_RST} — ${config_dir}"
+  if ! jq -e '.version == 1 and (.files | type) == "object"' "$mf" >/dev/null 2>&1; then
+    say "no integrity manifest found (or it is unreadable) — re-run the installer for this profile to create one."
+    return 1
+  fi
+
+  local drift=0 rel want got
+  while IFS=$'\t' read -r rel want; do
+    [ -n "$rel" ] || continue
+    case "/$rel/" in */../*|//*) say "changed: $rel (not a path inside the profile)"; drift=1; continue ;; esac
+    if [ ! -e "$config_dir/$rel" ]; then
+      say "missing: $rel"; drift=1
+    else
+      got="$(sha256_file "$config_dir/$rel" 2>/dev/null || true)"
+      [ "$got" = "$want" ] || { say "changed: $rel"; drift=1; }
+    fi
+  done < <(jq -r '.files | to_entries[] | [.key, (.value | tostring)] | @tsv' "$mf")
+  if [ -d "$config_dir/hooks/lib" ]; then
+    while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      jq -e --arg k "$rel" '.files | has($k)' "$mf" >/dev/null 2>&1 || { say "unexpected: $rel"; drift=1; }
+    done < <(cd "$config_dir" && find hooks/lib ! -type d | LC_ALL=C sort)
+  fi
+
+  # Settings: re-extract the kit-managed subset with the same program the hook uses,
+  # compare its hash, and when it differs, name what the kit expected but can't find.
+  local m want_s got_s
+  m="$(jq -c '{files, kit: (.kit // {})}' "$mf")"
+  want_s="$(jq -r '.settings // ""' "$mf")"
+  if ! got_s="$(integrity_settings_hash "$config_dir" "$m")"; then
+    say "settings: could not be checked (settings.json is not valid JSON)"; drift=1
+  elif [ "$got_s" != "$want_s" ]; then
+    drift=1
+    say "settings: kit-managed settings drifted"
+    local prog real roots subset
+    prog="$config_dir/hooks/lib/managed-settings.jq"
+    [ -f "$prog" ] || prog="$CONFIG_SRC/hooks/lib/managed-settings.jq"
+    real="$(cd "$config_dir" && pwd -P)" || real="$config_dir"
+    roots="$(jq -nc --arg a "$config_dir" --arg b "$real" '[$a, $b] | unique')"
+    subset="$({ if [ -f "$config_dir/settings.json" ]; then cat "$config_dir/settings.json"; else printf '{}'; fi; } \
+      | jq -S -c --argjson m "$m" --arg home "$HOME" --argjson roots "$roots" -f "$prog" 2>/dev/null || printf '{}')"
+    local listed
+    listed="$(jq -rn --argjson m "$m" --argjson s "$subset" '
+      ($m.kit // {}) as $k
+      | [ (($k.deny // []) - ($s.deny // []))[] | "  missing: permissions.deny \(.)" ]
+      + [ $m.files | keys[] | select(test("^hooks/[^/]+$")) | select(. != "hooks/statusline.ts")
+          | . as $f | select([$s.hooks[]?.command | tostring | select(contains("/" + $f))] | length == 0)
+          | "  missing: hook registration for \($f)" ]
+      + (if $k.statusLine == true and ($s.statusLine == null) then ["  missing: statusLine"] else [] end)
+      + (if $k.sandbox == true and ($s.sandbox != true) then ["  changed: sandbox.enabled is \($s.sandbox)"] else [] end)
+      | .[]')"
+    if [ -n "$listed" ]; then say "$listed"
+    else say "  a kit-managed hook registration, statusLine or sandbox value was edited"; fi
+  fi
+
+  say ""
+  if [ "$drift" = "0" ]; then
+    ok "no drift: kit files and kit-managed settings match the manifest"
+    return 0
+  fi
+  say "To restore the kit's files and settings, re-run the installer for this profile"
+  say "  (aka-claude-tools, or ./install.sh, with the same additions). Your own settings are kept."
+  return 1
+}
+
 # Run the installer only when EXECUTED, not when SOURCED. Sourcing the script (with
 # its top-level definitions) lets the test suite reach the pure helpers above
 # (merge_settings, prune_hook_regs, setup_alias, …) without performing an install.
@@ -2366,5 +2585,6 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   elif [ "$CT_DELETE_ALIAS" = "1" ];  then delete_alias_entry
   elif [ "$CT_ENUMERATE" = "1" ];     then enumerate_entry
   elif [ "$CT_AUDIT_LOG_MODE" = "1" ]; then audit_log_entry
+  elif [ "$CT_AUDIT_MODE" = "1" ];     then integrity_audit_entry
   else ct_main; fi
 fi
