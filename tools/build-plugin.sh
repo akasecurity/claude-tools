@@ -16,8 +16,10 @@ jq -n --arg v "$(cat VERSION)" '{
 
 # copy launcher + preflight + shared lib (secret-patterns.json for defense-in-depth,
 # the vendored guard-core every bundled guard hook runs on, and audit.ts — the local
-# security-event audit log the guard hooks call; in the plugin, profile-root
-# resolution never finds a .aka-claude-tools-meta file, so it writes nothing here)
+# security-event audit log the guard hooks call; each hook's own isPluginInstall()
+# check forces audit logging off outright for a /plugins/ install path, even when it
+# happens to run inside a profile that DOES have a real .aka-claude-tools-meta, so
+# audit.ts is copied here for completeness but writes nothing from this build)
 install -m 0755 config/hooks/bun-hook-launch.sh config/hooks/preflight.sh "$HK"/
 mkdir -p "$HK/lib" && cp config/hooks/lib/secret-patterns.json config/hooks/lib/guard-core.js \
   config/hooks/lib/audit.ts "$HK/lib/"
