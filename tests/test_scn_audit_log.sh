@@ -51,7 +51,12 @@ no_such()   { [ ! -e "$1" ]; }
 is_symlink(){ [ -L "$1" ]; }
 dir_empty() { [ -z "$(ls -A "$1" 2>/dev/null)" ]; }
 file_empty(){ [ ! -s "$1" ]; }
-stat_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+# Portable octal file mode. BSD stat uses `-f '%Lp'`; GNU stat uses `-c '%a'`.
+# These are NOT interchangeable across flavors — GNU's `-f` means
+# `--file-system`, so a `stat -f '%Lp' … || stat -c '%a' …` fallback chain
+# prints filesystem info (and exits 0) instead of the mode on Linux, since the
+# GNU form doesn't error, it just means something else. Branch on the OS instead.
+stat_mode() { if [ "$(uname)" = "Darwin" ]; then stat -f '%Lp' "$1"; else stat -c '%a' "$1"; fi; }
 # A stub `trufflehog` that ALWAYS reports a hit, regardless of input — same
 # technique as tools/capture-guard-golden.ts's buildPathTrufflehogHit, used here to
 # force a deterministic "secret-detected" (trufflehog tier) block on demand.
