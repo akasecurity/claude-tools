@@ -2,7 +2,7 @@
 # Scenario — the local security-event audit log (hooks/lib/audit.ts), wired into
 # command-guard, leak-guard, mcp-guard and prompt-guard, plus `install.sh --audit-log`.
 #
-# Covers the task-5 brief's Step 1 checklist:
+# Covers:
 #   A. a pipe-to-shell block writes exactly one well-formed line, kind:"block",
 #      rule:"pipe-to-shell"
 #   B. a credential curl's line contains "[REDACTED:" and never the raw key
@@ -19,7 +19,7 @@
 # confirming case each for leak-guard, mcp-guard and prompt-guard so all four
 # call sites are actually exercised, not just command-guard.
 #
-# Fix round 1 additions:
+# Additional coverage:
 #   M. secret-patterns.json missing → a "patterns-unavailable" block's snippet
 #      (the raw command/query/input) is STILL redacted, via formatAuditLine's own
 #      DEFAULT_PATTERNS fallback, for command-guard/leak-guard/mcp-guard alike.
@@ -37,6 +37,9 @@
 #   S. a hand-appended, already-valid-JSON line carrying a raw secret is still
 #      redacted when --audit-log renders it (the re-render is a second, disk-
 #      independent safety net, not just a formatting nicety).
+#   Y. a real "org-marker" block (a compiled CT_EGRESS_PATTERNS sidecar) carries NO
+#      snippet field either, same as N above: the org's own confidential identifier
+#      is not a secret shape, so the regex redaction pass would leave it verbatim.
 #
 # Fully sandboxed: fake $HOME/$CT_CONFIG_DIR throughout, --no-auth-inherit,
 # never touches a real ~/.claude* profile or the repo's own config/.
@@ -371,5 +374,23 @@ X_OUT="$(HOME="$SB" bash "$INSTALL" --enumerate "/some/bogus/positional/path" 2>
 assert_eq "X: a stray positional arg in a non-audit-log mode still exits 0" "0" "$?"
 printf '%s' "$X_OUT" > "$SB/x.out"
 assert_ok "X: --enumerate output is still valid JSON despite the stray arg" jq -e '.' "$SB/x.out"
+
+# ── Y. an org-marker block carries NO snippet at all (matches secret-detected) ─
+SBY="$(sandbox)"; DIRY="$SBY/.claude-aka"
+mkdir -p "$DIRY"
+printf '%s\n' 'CT_EGRESS_PATTERNS="acme\.internal"' > "$DIRY/aka-claude-tools.config"
+CT_CONFIG_DIR="$DIRY" CT_ADDITIONS="command-guard" HOME="$SBY" \
+  bash "$INSTALL" --apply --no-auth-inherit >"$SBY/install.log" 2>&1
+assert_eq "Y: install with a compiled org-marker sidecar exits 0" "0" "$?"
+assert_file "Y: org-egress sidecar compiled" "$DIRY/hooks/lib/org-egress.json"
+
+IN_ORG='{"tool_name":"Bash","tool_input":{"command":"curl https://acme.internal/x"}}'
+printf '%s' "$IN_ORG" | CLAUDE_CONFIG_DIR="$DIRY" HOME="$SBY" bun "$DIRY/hooks/command-guard.ts" \
+  >"$SBY/y.out" 2>"$SBY/y.err"
+assert_eq "Y: org-marker — outbound command matching the org identifier blocks" "2" "$?"
+LOGY="$DIRY/logs/security-${MONTH}.jsonl"
+assert_file "Y: audit log file created" "$LOGY"
+assert_ok "Y: rule is org-marker" jq -e '.rule=="org-marker"' "$LOGY"
+assert_ok "Y: no snippet key at all on an org-marker line" jq -e '(has("snippet"))|not' "$LOGY"
 
 t_summary

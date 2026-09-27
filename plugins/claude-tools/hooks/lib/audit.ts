@@ -40,11 +40,15 @@
 // query/input (see e.g. evaluateBash's `patterns-unavailable` rule, whose snippet
 // IS the raw command). `undefined` instead asks formatAuditLine for its own bundled
 // `DEFAULT_PATTERNS`, so the audit line still gets a real redaction pass regardless
-// of whether the installed patterns file is present. The `rule === 'secret-detected'`
-// tier goes one step further and drops the snippet FIELD entirely, independent of
-// patterns: that block comes from the trufflehog scanner, which can flag secret
-// shapes the bundled regex patterns don't recognise, so no regex-based redaction
-// pass can be trusted to have caught it.
+// of whether the installed patterns file is present. Two rules go one step further
+// and drop the snippet FIELD entirely, independent of patterns:
+//   - `secret-detected` — that block comes from the trufflehog scanner, which can
+//     flag secret shapes the bundled regex patterns don't recognise, so no
+//     regex-based redaction pass can be trusted to have caught it.
+//   - `org-marker` — that block matches the org's own confidential identifier
+//     (hostname, IP, path, or username, from CT_EGRESS_PATTERNS), which is not a
+//     secret shape at all, so the credential-pattern redaction pass has nothing to
+//     match and leaves it verbatim in the snippet.
 //
 // This function adds one more layer on top of formatAuditLine: directory/file
 // creation, permissions, and the symlink/race defenses below are ALL best-effort
@@ -107,10 +111,13 @@ export function appendAudit(
     if (!existsSync(join(opts.profileRoot, '.aka-claude-tools-meta'))) return;
 
     const full: AuditEvent = { ...event, ts: new Date().toISOString(), kit: KIT, harness: HARNESS };
-    // The trufflehog tier can flag a secret shape none of the bundled regex
-    // patterns recognise, so no regex-based redaction pass can be trusted here —
-    // drop the snippet outright rather than rely on formatAuditLine to catch it.
-    if (full.rule === 'secret-detected') delete full.snippet;
+    // Neither rule's snippet can be trusted to formatAuditLine's regex-based
+    // redaction: the trufflehog tier (`secret-detected`) can flag a secret shape
+    // none of the bundled patterns recognise, and `org-marker` matches the org's
+    // own confidential identifier, not a secret shape a credential pattern would
+    // ever redact. Drop the snippet outright for both, rather than rely on
+    // formatAuditLine to catch something it was never built to catch.
+    if (full.rule === 'secret-detected' || full.rule === 'org-marker') delete full.snippet;
     // `?? undefined`, never a bare `null` — see the module doc's patterns note.
     const line = formatAuditLine(full, opts.patterns ?? undefined);
 
