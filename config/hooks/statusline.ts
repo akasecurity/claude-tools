@@ -41,6 +41,7 @@ interface HookInput {
   workspace?: { current_dir?: string; git_worktree?: string };
   cwd?: string;
   session_id?: string; session_name?: string;
+  transcript_path?: string;
   model?: { display_name?: string; id?: string } | string;
   version?: string;
   context_window?: { context_window_size?: number; used_percentage?: number; total_input_tokens?: number };
@@ -389,6 +390,54 @@ function writeAtomic(path: string, content: string): void {
   } catch { /* cache writes are best-effort */ }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// STATUS SIDECAR — opt-in (CLAUDE_TOOLS_STATUS_SIDECAR_DIR). The status line is the only
+// surface where Claude Code hands a program the session's context-window usage; this
+// persists the fields CC already provides to <dir>/<session_id>.json so other local
+// tools can read them. Unset = no file, no behavior change. Best-effort: never throws.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface SidecarPayload {
+  v: 1; session_id: string; transcript_path: string | null; cwd: string | null; model_id: string | null;
+  context_window: { used_percentage: number | null; context_window_size: number | null; total_input_tokens: number | null };
+}
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+export function sidecarPayload(input: HookInput): SidecarPayload | null {
+  if (!input.session_id) return null;
+  const modelId = typeof input.model === 'object' && input.model ? input.model.id ?? null
+                : typeof input.model === 'string' ? input.model : null;
+  const cw = input.context_window ?? {};
+  return {
+    v: 1, session_id: input.session_id, transcript_path: input.transcript_path ?? null,
+    cwd: input.workspace?.current_dir || input.cwd || null, model_id: modelId,
+    context_window: { used_percentage: num(cw.used_percentage), context_window_size: num(cw.context_window_size),
+                      total_input_tokens: num(cw.total_input_tokens) },
+  };
+}
+export function sidecarPath(dir: string, sessionId: string): string | null {
+  if (!dir || !/^[A-Za-z0-9-]+$/.test(sessionId)) return null;
+  return `${dir.replace(/\/+$/, '')}/${sessionId}.json`;
+}
+export function writeSidecar(input: HookInput, dirEnv: string | undefined, now = Date.now()): string | null {
+  try {
+    if (!dirEnv) return null;
+    // Collapse any run of slashes (e.g. a HOME env var carrying a trailing slash meeting the
+    // leading "/" below) so the resulting path matches what path.join-style callers expect.
+    const dir = (dirEnv.startsWith('~/') ? `${process.env.HOME}/${dirEnv.slice(2)}` : dirEnv).replace(/\/{2,}/g, '/');
+    // After ~ expansion, only an absolute path is acceptable (e.g. $HOME unset would leave
+    // "~/foo" expanding to "/foo" — fine — or "undefined/foo" — not absolute, reject it).
+    if (!dir.startsWith('/')) return null;
+    const payload = sidecarPayload(input);
+    const path = payload && sidecarPath(dir, payload.session_id);
+    if (!payload || !path) return null;
+    const body = JSON.stringify(payload);
+    const prev = readJSON<SidecarPayload & { updated_at?: number }>(path);
+    if (prev) { const { updated_at: _u, ...rest } = prev; if (JSON.stringify(rest) === body) return null; }
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeAtomic(path, JSON.stringify({ ...payload, updated_at: now }) + '\n');
+    return path;
+  } catch { return null; }
+}
+
 // Run a subprocess with an argv array (no shell) and return trimmed stdout, or '' on error.
 function run(cmd: string, args: string[], cwd?: string): string {
   try {
@@ -733,6 +782,7 @@ export async function gather(input: HookInput, settings: Settings): Promise<Stat
 
 async function main(): Promise<string> {
   const input = parseInput(readFile('/dev/stdin'));
+  writeSidecar(input, process.env.CLAUDE_TOOLS_STATUS_SIDECAR_DIR);
   const settings = loadSettings();
   const state = await gather(input, settings);
   return render(state);

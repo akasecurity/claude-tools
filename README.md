@@ -150,6 +150,16 @@ Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.
 | `telemetry-off` | Sets `DISABLE_TELEMETRY`. Opt-in because it disables Remote Control (driving the CLI from a claude.ai session). | ○ opt-in |
 | `autoupdater-off` | Sets `DISABLE_AUTOUPDATER` to stop background updates; `claude update` still works. | ○ opt-in |
 
+`statusline` also has its own opt-in **sidecar**: set `CLAUDE_TOOLS_STATUS_SIDECAR_DIR` and it
+writes `<dir>/<session_id>.json` with the session's context-window usage, model, and cwd — fields
+Claude Code hands only to the status line — so a local tool can read them without scraping the
+rendered bar. Written atomically and only when a value actually changes; leaving the variable
+unset means no file and no change in behavior. Example, in `settings.json`:
+
+```json
+{ "env": { "CLAUDE_TOOLS_STATUS_SIDECAR_DIR": "~/.cache/claude-status" } }
+```
+
 ### Configuring the opt-in env keys
 
 Four of the additions above read per-environment policy from
