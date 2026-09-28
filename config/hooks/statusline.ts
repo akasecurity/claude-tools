@@ -423,6 +423,9 @@ export function writeSidecar(input: HookInput, dirEnv: string | undefined, now =
     // Collapse any run of slashes (e.g. a HOME env var carrying a trailing slash meeting the
     // leading "/" below) so the resulting path matches what path.join-style callers expect.
     const dir = (dirEnv.startsWith('~/') ? `${process.env.HOME}/${dirEnv.slice(2)}` : dirEnv).replace(/\/{2,}/g, '/');
+    // After ~ expansion, only an absolute path is acceptable (e.g. $HOME unset would leave
+    // "~/foo" expanding to "/foo" — fine — or "undefined/foo" — not absolute, reject it).
+    if (!dir.startsWith('/')) return null;
     const payload = sidecarPayload(input);
     const path = payload && sidecarPath(dir, payload.session_id);
     if (!payload || !path) return null;

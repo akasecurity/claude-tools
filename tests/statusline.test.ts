@@ -135,10 +135,21 @@ eq('writeSidecar env unset writes nothing', writeSidecar(scIn, undefined), null)
   eq('rewrite stamps new updated_at', JSON.parse(readFileSync(p!, 'utf8')).updated_at, 3000);
   ok('no temp files left behind', readdirSync(target).every((f) => !f.includes('.tmp.')));
   eq('writeSidecar bad session id writes nothing', writeSidecar({ ...scIn, session_id: 'a/b' }, target), null);
-  const home = process.env.HOME!;
-  const tp = writeSidecar(scIn, '~/sc-tilde', 1);
-  eq('writeSidecar expands leading ~', tp, join(home, 'sc-tilde', 'abc-123.json'));
-  ok('tilde file exists', existsSync(join(home, 'sc-tilde', 'abc-123.json')));
+  eq('writeSidecar rejects a non-absolute dir', writeSidecar(scIn, 'relative/dir'), null);
+  ok('non-absolute dir created nothing', !existsSync('relative'));
+  // Sandbox HOME for the duration of this one case only — writeSidecar resolves a
+  // leading "~/" against $HOME, so exercising that path for real must never touch the
+  // operator's actual home dir. Restore HOME in finally even if an assertion throws.
+  const realHome = process.env.HOME;
+  const tildeHome = mkdtempSync(join(tmpdir(), 'sc-home-'));
+  try {
+    process.env.HOME = tildeHome;
+    const tp = writeSidecar(scIn, '~/sc-tilde', 1);
+    eq('writeSidecar expands leading ~', tp, join(tildeHome, 'sc-tilde', 'abc-123.json'));
+    ok('tilde file exists', existsSync(join(tildeHome, 'sc-tilde', 'abc-123.json')));
+  } finally {
+    process.env.HOME = realHome;
+  }
 }
 
 console.log(`  \x1b[1m${pass} passed, ${fail} failed\x1b[0m`);
