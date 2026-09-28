@@ -18,6 +18,10 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   unknown ids, so drop `secure-research` from any saved `CT_ADDITIONS` list.
 
 ### Added
+- Status line **sidecar** (opt-in): set `CLAUDE_TOOLS_STATUS_SIDECAR_DIR` and the status line
+  writes `<dir>/<session_id>.json` with the session's context-window usage, model and cwd — the
+  fields Claude Code only exposes to the status line — so local tools can read them. Written
+  atomically, only on change; unset means no file and no behavior change.
 - **`post-guard`**: a new PostToolUse guard on `Read`, `WebFetch`, `WebSearch`, and every
   MCP tool's output (`mcp__*`), on by default. Redacts anything shaped like a secret from
   a file read, a fetched page, a search result, or an MCP tool's returned content,

@@ -11,7 +11,11 @@
 // this so the test_*.sh glob in run.sh picks it up). Exits non-zero if any assert fails.
 import {
   render, stringWidth, truncateToWidth, parseEpoch, deriveModel, widthMode, meter, levelColor,
+  sidecarPayload, sidecarPath, writeSidecar,
 } from '../config/hooks/statusline.ts';
+import { mkdtempSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 let pass = 0, fail = 0;
 function ok(desc: string, cond: boolean, detail = ''): void {
@@ -98,6 +102,44 @@ eq('levelColor high (>=85)', levelColor(85), SEV_HIGH);
 ok('meter nonzero fills at least one block', (meter(10, 1).match(/▰/g)?.length ?? 0) === 1);
 ok('meter zero fills no blocks', (meter(10, 0).match(/▰/g)?.length ?? 0) === 0);
 ok('meter full fills all blocks', (meter(10, 100).match(/▰/g)?.length ?? 0) === 10);
+
+// ── status sidecar (opt-in CLAUDE_TOOLS_STATUS_SIDECAR_DIR) ─────────────────
+const scIn: any = {
+  session_id: 'abc-123', transcript_path: '/t/abc-123.jsonl', cwd: '/w/proj',
+  model: { id: 'claude-opus-5-5', display_name: 'Opus 5.5' },
+  context_window: { used_percentage: 46, context_window_size: 1000000, total_input_tokens: 461076 },
+};
+eq('sidecarPayload maps fields', JSON.stringify(sidecarPayload(scIn)), JSON.stringify({
+  v: 1, session_id: 'abc-123', transcript_path: '/t/abc-123.jsonl', cwd: '/w/proj', model_id: 'claude-opus-5-5',
+  context_window: { used_percentage: 46, context_window_size: 1000000, total_input_tokens: 461076 },
+}));
+eq('sidecarPayload null without session_id', sidecarPayload({}), null);
+eq('sidecarPayload tolerates string model + missing ctx',
+  JSON.stringify(sidecarPayload({ session_id: 'x', model: 'm' } as any)?.context_window),
+  JSON.stringify({ used_percentage: null, context_window_size: null, total_input_tokens: null }));
+eq('sidecarPath rejects traversal', sidecarPath('/d', '../etc/x'), null);
+eq('sidecarPath rejects empty dir', sidecarPath('', 'abc'), null);
+eq('sidecarPath ok', sidecarPath('/d', 'abc-123'), '/d/abc-123.json');
+eq('writeSidecar env unset writes nothing', writeSidecar(scIn, undefined), null);
+{
+  const d = mkdtempSync(join(tmpdir(), 'sc-'));
+  const target = join(d, 'nested');
+  const p = writeSidecar(scIn, target, 1000);
+  eq('writeSidecar returns path', p, join(target, 'abc-123.json'));
+  const j = JSON.parse(readFileSync(p!, 'utf8'));
+  eq('writeSidecar stamps updated_at', j.updated_at, 1000);
+  eq('writeSidecar same values → no rewrite', writeSidecar(scIn, target, 2000), null);
+  eq('updated_at unchanged after no-op', JSON.parse(readFileSync(p!, 'utf8')).updated_at, 1000);
+  const moved = { ...scIn, context_window: { ...scIn.context_window, used_percentage: 47 } };
+  eq('writeSidecar changed values → rewrite', writeSidecar(moved, target, 3000), p);
+  eq('rewrite stamps new updated_at', JSON.parse(readFileSync(p!, 'utf8')).updated_at, 3000);
+  ok('no temp files left behind', readdirSync(target).every((f) => !f.includes('.tmp.')));
+  eq('writeSidecar bad session id writes nothing', writeSidecar({ ...scIn, session_id: 'a/b' }, target), null);
+  const home = process.env.HOME!;
+  const tp = writeSidecar(scIn, '~/sc-tilde', 1);
+  eq('writeSidecar expands leading ~', tp, join(home, 'sc-tilde', 'abc-123.json'));
+  ok('tilde file exists', existsSync(join(home, 'sc-tilde', 'abc-123.json')));
+}
 
 console.log(`  \x1b[1m${pass} passed, ${fail} failed\x1b[0m`);
 process.exit(fail > 0 ? 1 : 0);
