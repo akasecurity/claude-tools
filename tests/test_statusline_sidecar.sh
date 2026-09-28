@@ -14,5 +14,5 @@ F="$SB/sc/e2e-1.json"
 [ -f "$F" ] || { echo "✗ no sidecar at $F"; exit 1; }
 [ "$(jq -r .context_window.used_percentage "$F")" = 12 ] || { echo "✗ used_percentage"; fail=1; }
 [ "$(jq -r .model_id "$F")" = m1 ] || { echo "✗ model_id"; fail=1; }
-[ "$(stat -f %Lp "$SB/sc" 2>/dev/null || stat -c %a "$SB/sc")" = 700 ] || { echo "✗ dir mode"; fail=1; }
+[ "$(stat -c %a "$SB/sc" 2>/dev/null || stat -f %Lp "$SB/sc")" = 700 ] || { echo "✗ dir mode"; fail=1; }
 [ $fail = 0 ] && echo "  ✓ statusline sidecar e2e" ; exit $fail
