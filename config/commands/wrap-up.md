@@ -61,4 +61,11 @@ top-to-bottom; skip steps that don't apply.
      from loose ends and don't dress it up as unfinished business.
    - If nothing is genuinely at risk, say so — "no loose ends" is a valid result.
 
+8. **Continuation prompt.** If work remains for a later session (open plan
+   steps, deferred follow-ups, a handoff), end with a short copy-paste prompt
+   for a fresh session in a fenced block: the repo path, the goal, where things
+   stand, the next concrete step, and pointers (files, branch, TODO section).
+   Keep it minimal; the fresh session reads the repo itself. Skip it when
+   nothing remains.
+
 Never merge. Never push.
