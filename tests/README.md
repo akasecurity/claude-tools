@@ -35,8 +35,7 @@ so the `.ts` guard deploy is exercised) alongside the shell/json lint
 | `test_promote` | Reverse flow (`tools/promote.sh`): a live edit round-trips path-remapped; a planted personal trace is refused; `--list` resolves the manifest. |
 | `test_guards` | The shared adversarial corpus (`corpus.json`) against BOTH egress guards: every block case blocked by ≥1 guard, every allow case passes both; plus fail-closed when the patterns file is missing. |
 | `test_tools` | Pre-publish leak gates: `leak-lib.sh` pattern library, `audit-history.sh` failing on secrets in file history / commit messages, `graduate.sh` arg validation. |
-| `test_scn_launcher_shim` | The PATH-visible launcher: `--alias` writes the `<cfg>/bin/<name>` shim + a two-line managed block (alias + guarded `PATH` export), the shim execs `claude` with the profile dir and forwarded args, re-runs are idempotent/repairing, a PATH-command name conflict is refused in strict mode (no false self-conflict on the profile's own shim), `--delete-alias` removes block + shim but never a marker-less user file, and a `--defaults` install claims `claude-aka` (bare `aka` and `aka-*` reserved for ai-tc). |
-| `test_scn_launcher_rename` | The rename to `claude-aka`: a fresh install writes only `claude-aka`; a profile recorded as `aka-claude` is migrated on `--apply` and on a `--defaults` re-run (new launcher written, `aka-claude` shim and alias line turned into a forwarder that prints `aka-claude is deprecated; use claude-aka` to stderr once and runs the new launcher), idempotently; a user-owned `aka-claude` shim is never overwritten; `--delete-alias aka-claude` removes only the forwarder, `--delete-alias claude-aka` and `uninstall.sh` remove both; `~/.claude-work` still defaults to `work`. |
+| `test_scn_launcher_shim` | The PATH-visible launcher: `--alias` writes the `<cfg>/bin/<name>` shim + a two-line managed block (alias + guarded `PATH` export), the shim execs `claude` with the profile dir and forwarded args, re-runs are idempotent/repairing, a PATH-command name conflict is refused in strict mode (no false self-conflict on the profile's own shim), `--delete-alias` removes block + shim but never a marker-less user file, and a `--defaults` install claims `aka-claude` (bare `aka` reserved for ai-tc). |
 
 ## Harness (`lib.sh`)
 
@@ -44,7 +43,7 @@ Source it at the top of a test; it provides `sandbox` (a temp dir auto-removed o
 exit — rooted under one per-process dir so it survives `d="$(sandbox)"`),
 `install_path` (a hermetic PATH symlink-farm for driving `install.sh` where the
 operator's own PATH commands — e.g. a real ai-tc `aka` or an installed
-`claude-aka` shim — must not trip the launcher-name conflict check), and asserts:
+`aka-claude` shim — must not trip the launcher-name conflict check), and asserts:
 `assert_ok` / `assert_fail` (exit-code), `assert_file`, `assert_eq`, `assert_grep` /
 `assert_ngrep` (regex), and `assert_lit` / `assert_nlit` (**literal** substring — use
 these for filesystem paths, hook commands, and JSON fragments that contain regex

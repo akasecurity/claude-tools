@@ -26,7 +26,7 @@ echo "test_scn_uninstall_clean:"
 
 SB="$(sandbox)"
 PROFILE="$SB/.claude-aka"
-ALIAS="claude-aka"   # the derived default launcher name (bare aka is reserved for ai-tc)
+ALIAS="aka-claude"   # the derived default launcher name (bare aka is reserved for ai-tc)
 RC="$SB/.bashrc"
 
 # Seed an rc with distinct user content BEFORE and AFTER where our block lands,

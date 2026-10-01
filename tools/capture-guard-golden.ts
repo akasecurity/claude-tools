@@ -103,7 +103,7 @@ if (!Bun.which('rtk')) {
 // NOTHING in that shape (see appendAudit's meta-file gate). That already holds by
 // construction, but ONLY if the spawned hook resolves its profile root from ITS
 // OWN location rather than an inherited CLAUDE_CONFIG_DIR — an operator (or CI
-// runner) capturing golden from inside an active `claude-aka`-style session would
+// runner) capturing golden from inside an active `aka-claude`-style session would
 // otherwise leak real profile writes into this run. Strip it defensively, the same
 // way tests/lib.sh does for the bash test suite.
 const baseEnv = { ...process.env };

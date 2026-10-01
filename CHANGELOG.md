@@ -134,17 +134,10 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   - It blocks MCP tool inputs it cannot fully scan: more than 1,000,000 characters of string
     content (about 1 MB), more than 200,000 values, or nesting deeper than 32 levels.
   - Every MCP tool call starts one `bun` process for the hook.
-- **Default launcher name is `claude-aka`** (was `aka`) for `~/.claude-aka` and the fallback
-  derivation. Bare `aka` and every `aka-*` name belong to the ai-tc AI Traffic Control CLI.
-  ai-tc's `aka claude` still runs `aka-claude`, so it keeps working on a profile migrated from
-  `aka-claude` (through the forwarder below); a fresh `claude-aka` install is not reached by
-  `aka claude` until ai-tc's dispatcher targets `claude-aka`. Basename-derived names
-  (`~/.claude-work` → `work`) are unchanged. A profile whose recorded launcher is `aka-claude` is migrated by `--apply` or
-  an installer re-run: it gets a `claude-aka` launcher, and `aka-claude` becomes a forwarder for
-  one release that prints `aka-claude is deprecated; use claude-aka` to stderr and runs
-  `claude-aka` with the same arguments. A user-owned `aka-claude` (no kit marker) is left alone.
-  `--delete-alias claude-aka` and `uninstall.sh` remove the forwarder too; `--delete-alias
-  aka-claude` removes only the forwarder.
+- **Default launcher name is `aka-claude`** (was `aka`) for `~/.claude-aka` and the fallback
+  derivation. Bare `aka` is reserved for the ai-tc AI Traffic Control CLI so `aka claude` can
+  dispatch to this launcher. Basename-derived names (`~/.claude-work` → `work`) are unchanged.
+  Existing profiles keep whatever alias they recorded; re-running does not rename them.
 - The guards (`command-guard`, `leak-guard`, `rtk-safe`) now run on the vendored guard-core
   library, with output unchanged from the previous standalone implementation (pinned by the
   golden output in `tests/golden/guard-output.json`; guard-core's own conformance fixtures run

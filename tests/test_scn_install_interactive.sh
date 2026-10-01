@@ -32,7 +32,7 @@ if ! command -v expect >/dev/null 2>&1; then
 fi
 
 SB="$(sandbox)"
-# Hermetic PATH for the spawned installer: an operator's real `claude-aka` PATH
+# Hermetic PATH for the spawned installer: an operator's real `aka-claude` PATH
 # command must not trigger the installer's conflict-rename mid-PTY-script.
 IPATH="$(install_path)"
 RC="$SB/.bashrc"; touch "$RC"            # deterministic rc target for alias blocks
@@ -139,8 +139,8 @@ assert_file "p2 selection honored: wrap-up command" "$P2/commands/wrap-up.md"
 assert_ok   "profiles 1 and 2 are distinct dirs" bash -c "[ '$P1' != '$P2' ] && [ -d '$P1' ] && [ -d '$P2' ]"
 
 # ── aliases: one managed block per profile, each pointing at its own dir ───────
-assert_lit  "rc has alias block for profile 1 (claude-aka — the derived default)" \
-  ">>> aka-claude-tools managed: claude-aka" "$RC"
+assert_lit  "rc has alias block for profile 1 (aka-claude — the derived default)" \
+  ">>> aka-claude-tools managed: aka-claude" "$RC"
 assert_lit  "rc has alias block for profile 2 (work)" \
   ">>> aka-claude-tools managed: work" "$RC"
 assert_lit  "p1 alias points at profile 1 dir" "CLAUDE_CONFIG_DIR=\"$P1\"" "$RC"

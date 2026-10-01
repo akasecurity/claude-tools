@@ -60,13 +60,11 @@ Always let the user choose the folder and alias. Only apply a default if they
 don't specify one:
 
 - **Config folder name**: default `~/.claude-aka`
-- **Alias**: default `claude-aka` (if the user picks a custom folder, suggest the
-  basename minus `.claude-`, e.g. `~/.claude-work` → `work`). Bare `aka` and every
-  `aka-*` name are **reserved** for the ai-tc AI Traffic Control CLI; never suggest
-  one. `install.sh --alias` refuses a name that is already a command on PATH. A
-  profile still on the previous default `aka-claude` is migrated by `--apply`: it
-  gets `claude-aka`, and `aka-claude` forwards to it with a deprecation notice for
-  one release.
+- **Alias**: default `aka-claude` (if the user picks a custom folder, suggest the
+  basename minus `.claude-`, e.g. `~/.claude-work` → `work`). Bare `aka` is
+  **reserved** for the ai-tc AI Traffic Control CLI: its git-style dispatcher runs
+  `aka claude` by exec'ing `aka-claude` from PATH — exactly this launcher's shim —
+  and `install.sh --alias` refuses a name that is already a command on PATH.
 - **If the folder you'd target already exists as an aka-managed profile, this is an
   UPGRADE, but say so and offer the alternative. Never silently default to
   upgrade-in-place.** A profile is aka-managed if it carries a

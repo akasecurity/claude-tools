@@ -38,14 +38,14 @@ echo "test_scn_edge_uninstall_residue:"
 SB="$(sandbox)"
 RC="$SB/.bashrc"
 PROFILE="$SB/.claude-aka"
-ALIAS="claude-aka"   # the documented default launcher name the README names
+ALIAS="aka-claude"   # the documented default launcher name the README names
 
-# (1) The user's OWN, pre-existing `alias claude-aka=` — a non-launcher shortcut.
+# (1) The user's OWN, pre-existing `alias aka-claude=` — a non-launcher shortcut.
 # This is the collision trigger: a real conflict that forces the installer to rename.
 USER_ALIAS_LINE="alias ${ALIAS}='cd ~/work && git status'"
 printf '# user fleet shortcut\n%s\n' "$USER_ALIAS_LINE" > "$RC"
 
-# (2) Install — collision handling auto-takes the alternate name `claude-aka2`.
+# (2) Install — collision handling auto-takes the alternate name `aka-claude2`.
 PATH="$(install_path)" CT_ADDITIONS="leak-guard wrap-up" SHELL=/bin/bash HOME="$SB" \
   bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$SB/log" 2>&1
 assert_eq "install.sh exits 0" "0" "$?"
