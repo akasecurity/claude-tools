@@ -13,7 +13,7 @@ jobs:
     name: shell — syntax & shellcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: bash -n (syntax) on every tracked shell file
         run: |
           set -euo pipefail
@@ -36,7 +36,7 @@ jobs:
     name: json — config validity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: jq parse every tracked JSON file
         run: |
           set -euo pipefail
@@ -52,7 +52,7 @@ jobs:
     name: plugin — build + schema validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install Claude Code CLI (for plugin validate)
         run: npm i -g @anthropic-ai/claude-code || true
       - name: Build + validate plugin
@@ -67,7 +67,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Check out the PR's REAL head, not the default refs/pull/N/merge ref:
           # GitHub's synthetic test-merge commit carries the operator's account

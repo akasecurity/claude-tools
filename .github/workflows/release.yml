@@ -22,7 +22,7 @@ jobs:
     # in -dev and correct in public.
     if: github.repository == 'akasecurity/claude-tools'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Extract version from tag
         id: ver
@@ -38,7 +38,7 @@ jobs:
           fi
 
       - name: Set up Node.js for npm publish
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'

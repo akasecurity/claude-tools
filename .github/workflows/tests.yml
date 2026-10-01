@@ -18,7 +18,7 @@ jobs:
     # locally, and it's what matters for the Linux users this installer ships to.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # bun is a real dependency of the command-guard + statusline hooks (.ts files):
       # install.sh only deploys+registers command-guard when bun is present and ABORTS if
       # statusline is selected without it, so CI needs bun to exercise the full recommended
