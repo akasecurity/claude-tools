@@ -8,6 +8,11 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+### Fixed
+- **`--delete-alias` keeps the profile's current alias record.** Deleting an older launcher alias left over from a
+  rename no longer clears the profile's recorded alias; the record is cleared only when the deleted alias is the
+  recorded one.
+
 ## [0.5.0] guard-core, audit log, MCP gating and the aka-claude launcher shim
 
 The PATH-visible launcher shim and name-conflict gate are Joshua Scott's work (#4, #5).

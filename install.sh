@@ -2203,7 +2203,11 @@ delete_alias_entry() {
       END { if (skip) for (i=0;i<n;i++) print buf[i] }
     ' "$rc" > "$tmp"
     mv "$tmp" "$rc"
-    [ -n "${CT_CONFIG_DIR:-}" ] && meta_set "$config_dir" alias "" || true
+    # Clear the recorded alias only if it IS the one deleted: a rename leaves the
+    # old name's block behind, and removing that must not wipe the current record.
+    if [ -n "${CT_CONFIG_DIR:-}" ] && [ "$(meta_get "$config_dir" alias)" = "$CT_ALIAS" ]; then
+      meta_set "$config_dir" alias ""
+    fi
     ok "Removed alias '${CT_ALIAS}' from ${rc}"
     # Also remove the launcher's PATH shim — but ONLY a file carrying the kit's
     # shim marker (never an arbitrary user file that shares the name). The shim
