@@ -12,6 +12,10 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 - **`--delete-alias` keeps the profile's current alias record.** Deleting an older launcher alias left over from a
   rename no longer clears the profile's recorded alias; the record is cleared only when the deleted alias is the
   recorded one.
+- **Re-running the installer keeps the profile's recorded launcher name.** A default re-run for
+  `~/.claude-aka` used to switch to the new `aka-claude` default even when the profile had recorded
+  an older name (such as `aka` or a custom one), leaving two launchers and overwriting the recorded
+  alias. It now offers the recorded name as the default. Fresh installs still default to `aka-claude`.
 
 ## [0.5.0] guard-core, audit log, MCP gating and the aka-claude launcher shim
 
