@@ -33,6 +33,9 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   fallback) through the `terminalSequence` hook output, so it works over SSH and inside
   tmux/screen. Pure shell (no bun). Override detection with `CLAUDE_NOTIFY_OSC=777|99|9|off`.
   Deselecting it removes the hook and both registrations.
+### Changed
+- The vendored `guard-core.js` (profile and plugin copies) now carries guard-core's MIT licence and attribution
+  header. The code is unchanged.
 
 - `CITATION.cff` now states the current version. It was left at 0.4.0 through the
   0.4.1 and 0.5.0 releases; the version test now pins it to `VERSION`.
