@@ -9,6 +9,7 @@ echo "test_scn_version:"
 INSTALL="$REPO_ROOT/install.sh"
 VERSION_FILE="$REPO_ROOT/VERSION"
 CHANGELOG="$REPO_ROOT/CHANGELOG.md"
+CITATION="$REPO_ROOT/CITATION.cff"
 
 assert_file "VERSION file exists" "$VERSION_FILE"
 assert_file "CHANGELOG.md exists" "$CHANGELOG"
@@ -37,5 +38,10 @@ assert_eq   "--version output unchanged with a trailing flag" "aka-claude-tools 
 # Release-sync: the VERSION must be documented in the CHANGELOG (catches a bump that
 # forgets the changelog entry).
 assert_lit  "CHANGELOG documents the current version" "[$ver]" "$CHANGELOG"
+
+# Release-sync: CITATION.cff carries the same version. It sat a patch behind for a
+# whole release because nothing pinned it.
+assert_file "CITATION.cff exists" "$CITATION"
+assert_grep "CITATION.cff states the current version" "^version: ${ver//./\\.}$" "$CITATION"
 
 t_summary
