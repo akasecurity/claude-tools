@@ -42,6 +42,6 @@ assert_lit  "CHANGELOG documents the current version" "[$ver]" "$CHANGELOG"
 # Release-sync: CITATION.cff carries the same version. It sat a patch behind for a
 # whole release because nothing pinned it.
 assert_file "CITATION.cff exists" "$CITATION"
-assert_lit  "CITATION.cff states the current version" "version: $ver" "$CITATION"
+assert_grep "CITATION.cff states the current version" "^version: ${ver//./\\.}$" "$CITATION"
 
 t_summary
