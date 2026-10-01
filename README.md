@@ -35,7 +35,7 @@ adds the guardrails for the obvious foot-guns:
 - **A kit file quietly edited, or a security setting reverted** → flagged at the next
   session start, with `--audit` to see exactly what changed.
 
-Eighteen small pieces, eleven on by default and seven opt-in. Each stands alone. Take what you want.
+Nineteen small pieces, eleven on by default and eight opt-in. Each stands alone. Take what you want.
 
 **claude-tools is safe defaults for the harness; [ai-tc](https://github.com/akasecurity/ai-tc) is the detection engine.** The secret scan here is a shallow fallback — pattern and key-shape matching on egress. It does not detect PII, PHI, or cardholder data, and it does not redact. When you need deep content detection with an audit trail, add ai-tc; the installer offers it. The two compose: posture from claude-tools, detection from ai-tc.
 
@@ -123,7 +123,7 @@ A guard you haven't watched fire is one you're only assuming works. Launch the p
 
 <p align="center"><img src="media/whats-inside.svg" alt="What's inside: additions grouped by what they do (graphic not yet refreshed for this release's count)." width="100%"></p>
 
-Eighteen additions; the menu is driven entirely by
+Nineteen additions; the menu is driven entirely by
 [`config/additions.json`](config/additions.json), the single source both install paths read.
 Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.pdf).
 
@@ -142,6 +142,7 @@ Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.
 | `wrap-up` | A `/wrap-up` command that summarizes, verifies, and stages a commit for review. Never commits on its own. | ○ opt-in |
 | `secure-deep-research` | Privacy-aware web research with per-claim adversarial verification before a cited synthesis. Sensitive topics are gated and routed through your own search instance. | ○ opt-in |
 | `harness-pointer` | A small nudge pointing the agent at the right CLI for your environment. Ships empty. | ○ opt-in |
+| `notify-osc` | A desktop notification when it's genuinely your turn — stays quiet while a background task (agent or shell) is still running. Auto-detects your terminal (Ghostty, kitty, WezTerm, iTerm2); works over SSH. | ○ opt-in |
 | `error-reporting-off` | Sets `DISABLE_ERROR_REPORTING` to opt out of Sentry error reporting. | ● on |
 | `feedback-off` | Sets `DISABLE_FEEDBACK_COMMAND` to disable the `/feedback` command. | ● on |
 | `feedback-survey-off` | Sets `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` to disable session quality surveys. | ● on |
