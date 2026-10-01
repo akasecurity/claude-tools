@@ -913,6 +913,14 @@ setup_one_config() {
     # this launcher's shim. So ~/.claude-aka (and the fallback) default to
     # `aka-claude`, never plain `aka`.
     [ "$alias_default" = "aka" ] && alias_default="aka-claude"
+    # A re-run keeps the alias the profile already recorded (e.g. a pre-rename
+    # `aka` or a custom name) unless CT_ALIAS names one. Ignore a recorded value
+    # that isn't a safe alias name rather than dying on it.
+    local recorded_alias; recorded_alias="$(meta_get "$config_dir" alias)"
+    if [ -z "${CT_ALIAS:-}" ] && [ -n "$recorded_alias" ] \
+       && ( assert_safe_alias_name "$recorded_alias" ) >/dev/null 2>&1; then
+      alias_default="$recorded_alias"
+    fi
     prompt alias_name "Shell alias to launch it:" "$alias_default"
   fi
 
