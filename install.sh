@@ -654,8 +654,26 @@ AKA_SHIM_MARKER='# aka-claude-tools launcher shim — managed by install.sh; saf
 # old name half-working. --delete-alias and uninstall.sh remove both together.
 # Each step reports what failed: this runs BEFORE the rc is touched, so dying
 # here leaves the user's shell config untouched rather than half-configured.
+# launcher_shim_foreign <config_dir> <name> — succeed (and print the path) when
+# <config_dir>/bin/<name> already exists but is NOT a kit shim (no marker, or
+# unreadable so it can't be checked). The PATH gate can't see such a file when
+# that bin dir is off the installer's PATH, so it is checked here directly.
+launcher_shim_foreign() {
+  local shim="$1/bin/$2"
+  { [ -e "$shim" ] || [ -L "$shim" ]; } || return 1
+  [ -f "$shim" ] && [ -r "$shim" ] && grep -qF "$AKA_SHIM_MARKER" "$shim" 2>/dev/null && return 1
+  printf '%s\n' "$shim"
+  return 0
+}
+
 write_launcher_shim() {
   local config_dir="$1" name="$2" shim
+  # Never overwrite a user-owned file that shares the launcher name; a marked
+  # kit shim is refreshed as before.
+  if shim="$(launcher_shim_foreign "$config_dir" "$name")"; then
+    warn "${shim} already exists and is not a launcher shim from this kit — left it untouched."
+    return 1
+  fi
   mkdir -p "$config_dir/bin" || die "Cannot create ${config_dir}/bin — your shell rc was NOT modified."
   shim="$config_dir/bin/$name"
   printf '#!/usr/bin/env bash\n%s\nCLAUDE_CONFIG_DIR="%s" exec claude "$@"\n' \
@@ -724,7 +742,7 @@ _write_launcher() {
   local rc="$1" config_dir="$2" name="$3"
   # Shim first: it can fail on a read-only or full disk, and a failure there must
   # not leave an alias block pointing at a launcher that was never created.
-  write_launcher_shim "$config_dir" "$name"
+  write_launcher_shim "$config_dir" "$name" || return 1
   write_managed_block "$rc" "$name" "$(launcher_block_content "$config_dir" "$name")"
   meta_set "$config_dir" alias "$name"
   ok "Aliased ${C_BOLD}${name}${C_RST} → $config_dir  ${C_DIM}(alias + PATH shim, in $rc)${C_RST}"
@@ -744,8 +762,9 @@ _launcher_alternate_prompt() {
   prompt newalias "  Use a different alias (blank = skip the alias entirely):" "${taken}2"
   if [ -n "$newalias" ]; then
     assert_safe_alias_name "$newalias"   # the prompted name is user input → re-gate it
-    if clash="$(launcher_path_conflict "$config_dir" "$newalias")"; then
-      warn "'${newalias}' is also a command on your PATH (${clash}) — not claiming it."
+    if clash="$(launcher_path_conflict "$config_dir" "$newalias")" \
+      || clash="$(launcher_shim_foreign "$config_dir" "$newalias")"; then
+      warn "'${newalias}' is also a command on your PATH or an existing file (${clash}) — not claiming it."
       say "  ${C_DIM}No alias written. Pick a free name and re-run, or launch with:${C_RST}  CLAUDE_CONFIG_DIR=\"${config_dir}\" claude"
       return 0
     fi
@@ -768,7 +787,7 @@ setup_alias() {
     # Still (re)write the shim so an idempotent re-run repairs a deleted one; the
     # PATH line may be absent here (the user hand-manages their own rc definition),
     # which is acceptable — the shim still works by absolute path.
-    write_launcher_shim "$config_dir" "$alias_name"
+    write_launcher_shim "$config_dir" "$alias_name" || true
     if remove_managed_block "$rc" "$alias_name"; then
       ok "Alias ${C_BOLD}${alias_name}${C_RST} already resolves to this profile via your shell config — removed our now-redundant block."
     else
@@ -800,6 +819,16 @@ setup_alias() {
     if [ "$alias_name" = "aka" ]; then
       say "  ${C_DIM}'aka' is the AI Traffic Control CLI. Keep the default 'aka-claude' launcher name instead — once ai-tc is installed, 'aka claude' dispatches to it and launches this profile.${C_RST}"
     fi
+    if [ "$policy" = "strict" ]; then
+      say "  ${C_DIM}Pick another launcher name and re-run, or launch with:${C_RST}  CLAUDE_CONFIG_DIR=\"${config_dir}\" claude"
+      return 1
+    fi
+    _launcher_alternate_prompt "$rc" "$config_dir" "$alias_name"
+    return 0
+  fi
+  # A user-owned file already at <config_dir>/bin/<name> is a collision too.
+  if clash="$(launcher_shim_foreign "$config_dir" "$alias_name")"; then
+    warn "${clash} already exists and is not a launcher shim from this kit — not overwriting it."
     if [ "$policy" = "strict" ]; then
       say "  ${C_DIM}Pick another launcher name and re-run, or launch with:${C_RST}  CLAUDE_CONFIG_DIR=\"${config_dir}\" claude"
       return 1
