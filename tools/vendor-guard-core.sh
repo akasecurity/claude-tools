@@ -22,7 +22,7 @@ js=config/hooks/lib/guard-core.js
   if [ "$first" = "// @bun" ]; then echo "$first"; fi
   cat <<'HDR'
 /*
- * guard-core — vendored from akasecurity/guard-core-dev, MIT, Copyright (c) 2026 William Lin
+ * guard-core — vendored from guard-core, MIT, Copyright (c) 2026 William Lin
  *
  * MIT License
  *
