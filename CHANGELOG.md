@@ -8,6 +8,8 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+## [0.5.1] launcher-name fixes, notify-osc and npm trusted publishing
+
 ### Changed
 - **The release workflow publishes to npm with trusted publishing (OIDC) and publishes before it creates the GitHub Release.**
   No `NPM_TOKEN` secret is used any more; the workflow runs on Node 24 (trusted publishing needs npm 11.5.1+), and a
@@ -371,7 +373,9 @@ state before the v0.2.0 public-ready prep.
 Initial internal deployment of the isolated-profile installer, the secure-defaults
 base, and the guard hooks.
 
-[Unreleased]: https://github.com/akasecurity/claude-tools/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/akasecurity/claude-tools/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/akasecurity/claude-tools/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/akasecurity/claude-tools/compare/v0.4.1...v0.5.0
 [0.4.0]: https://github.com/akasecurity/claude-tools/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/akasecurity/claude-tools/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/akasecurity/claude-tools/compare/v0.1.1...v0.2.0
