@@ -756,7 +756,8 @@ _write_launcher() {
 # _launcher_alternate_prompt <rc> <config_dir> <taken_name> — interactive-policy
 # fallback when <taken_name> is unavailable (rc-alias collision or PATH command):
 # offer an alternate (default <name>2), re-gate it, and refuse to claim an
-# alternate that is ALSO a command on PATH (bounded — no re-prompt loop).
+# alternate that is ALSO a command on PATH or an rc-defined alias for another
+# target (bounded — no re-prompt loop).
 _launcher_alternate_prompt() {
   local rc="$1" config_dir="$2" taken="$3" newalias="" clash
   prompt newalias "  Use a different alias (blank = skip the alias entirely):" "${taken}2"
@@ -765,6 +766,14 @@ _launcher_alternate_prompt() {
     if clash="$(launcher_path_conflict "$config_dir" "$newalias")" \
       || clash="$(launcher_shim_foreign "$config_dir" "$newalias")"; then
       warn "'${newalias}' is also a command on your PATH or an existing file (${clash}) — not claiming it."
+      say "  ${C_DIM}No alias written. Pick a free name and re-run, or launch with:${C_RST}  CLAUDE_CONFIG_DIR=\"${config_dir}\" claude"
+      return 0
+    fi
+    # Same rc-alias gate as the primary name: a managed block for an alternate the
+    # user already defines (rc or a sourced file) would shadow their alias.
+    clash="$(alias_target_elsewhere "$newalias" "$rc")"
+    if [ -n "$clash" ] && [ "$clash" != "$config_dir" ]; then
+      warn "'${newalias}' is also an alias in your shell config — not claiming it."
       say "  ${C_DIM}No alias written. Pick a free name and re-run, or launch with:${C_RST}  CLAUDE_CONFIG_DIR=\"${config_dir}\" claude"
       return 0
     fi
