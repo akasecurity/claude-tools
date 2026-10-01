@@ -7,6 +7,12 @@ lock=$L/guard-core.lock.json
 [ -f "$lock" ] || { echo "FAIL: no $lock"; exit 1; }
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 [ "$(sha $L/guard-core.js)" = "$(jq -r .sha256 "$lock")" ] || { echo "FAIL: guard-core.js hash drift"; exit 1; }
+# MIT notice must travel with the vendored bundle; stripping the header block (the lines
+# from "/*" through " */" right after the `// @bun` pragma) must give back upstream's bytes.
+head -3 $L/guard-core.js | grep -q 'vendored from akasecurity/guard-core-dev, MIT, Copyright (c) 2026 William Lin' \
+  || { echo "FAIL: guard-core.js lacks the MIT licence header — re-run tools/vendor-guard-core.sh"; exit 1; }
+[ "$(awk 'NR==2&&$0=="/*"{h=1;next} h&&$0==" */"{h=0;next} !h' $L/guard-core.js | shasum -a 256 | cut -d' ' -f1)" = "$(jq -r .upstreamSha256 "$lock")" ] \
+  || { echo "FAIL: guard-core.js minus licence header differs from upstream dist (upstreamSha256)"; exit 1; }
 [ "$(sha $L/guard-core.d.ts)" = "$(jq -r .dtsSha256 "$lock")" ] || { echo "FAIL: guard-core.d.ts hash drift"; exit 1; }
 fixtures=tests/fixtures/guard-core-conformance.json
 [ -f "$fixtures" ] || { echo "FAIL: no $fixtures"; exit 1; }

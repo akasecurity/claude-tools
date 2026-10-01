@@ -335,3 +335,8 @@ The implementations here are our own. Built for
 ## License
 
 [MIT](LICENSE).
+
+The guard hooks run on a vendored copy of guard-core (`config/hooks/lib/guard-core.js`,
+also shipped in the plugin), from akasecurity/guard-core-dev, MIT, Copyright (c) 2026
+William Lin. Its licence text travels in that file's header; `tools/vendor-guard-core.sh`
+re-adds the header on every re-vendor.
