@@ -8,6 +8,10 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+## [0.5.0] guard-core, audit log, MCP gating and the aka-claude launcher shim
+
+The PATH-visible launcher shim and name-conflict gate are Joshua Scott's work (#4, #5).
+
 ### Added
 - **Status sidecar `rate_limits`.** The opt-in status line sidecar now also mirrors Claude Code's five-hour and seven-day
   rate-limit windows (usage and reset time) when Claude Code supplies them. Additive; nothing changes without
