@@ -34,6 +34,9 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   tmux/screen. Pure shell (no bun). Override detection with `CLAUDE_NOTIFY_OSC=777|99|9|off`.
   Deselecting it removes the hook and both registrations.
 
+- `CITATION.cff` now states the current version. It was left at 0.4.0 through the
+  0.4.1 and 0.5.0 releases; the version test now pins it to `VERSION`.
+
 ## [0.5.0] guard-core, audit log, MCP gating and the aka-claude launcher shim
 
 The PATH-visible launcher shim and name-conflict gate are Joshua Scott's work (#4, #5).
