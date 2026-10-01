@@ -65,7 +65,21 @@ jobs:
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
+      - name: Check whether this version is already on npm
+        id: npmcheck
+        run: |
+          # A rerun of the same tag (for example after the Release step failed) must not die on
+          # npm's "cannot publish over an existing version": skip the publish and carry on.
+          NAME="$(node -p "require('./package.json').name")"
+          if npm view "${NAME}@${{ steps.ver.outputs.version }}" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "${NAME}@${{ steps.ver.outputs.version }} is already on npm — skipping publish"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish to npm
+        if: steps.npmcheck.outputs.published != 'true'
         run: npm publish --provenance --access public
 
       - name: Create distribution tarball
