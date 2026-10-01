@@ -40,28 +40,33 @@ jobs:
       - name: Set up Node.js for npm publish
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'   # trusted publishing needs Node >= 22.14 and npm >= 11.5.1
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Preflight — validate npm auth before any external artifact is created
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Preflight — npm CLI supports trusted publishing (OIDC)
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::error::NPM_TOKEN secret is not set — aborting BEFORE creating the GitHub Release"
-            exit 1
-          fi
-          # Prove the token AUTHENTICATES (not just non-empty): an empty or revoked
-          # token fails here, BEFORE the GitHub Release is created — closing the common
-          # half-fire modes. This is identity only; it does not prove publish rights for
-          # this package name (no non-destructive npm check does), so an authenticated
-          # token that still lacks publish authorization can fail at the publish step.
-          # That window is narrow (the publishing identity is fixed by NPM_TOKEN) and the
-          # gh-release step is idempotent on a re-run of the same tag once the token is fixed.
-          if ! npm whoami >/dev/null 2>&1; then
-            echo "::error::NPM_TOKEN is set but does not authenticate (npm whoami failed) — aborting before the GitHub Release"
-            exit 1
-          fi
+          # Publishing authenticates with the workflow's OIDC identity (npm trusted publisher
+          # configured on npmjs.com for akasecurity/claude-tools + release.yml); there is no
+          # NPM_TOKEN. OIDC cannot be probed without publishing, so fail early on the one thing
+          # we can check: an npm CLI too old to do the token exchange.
+          npm --version
+          node -e "
+            const [a,b,c]=process.argv[1].split('.').map(Number);
+            if (a<11 || (a===11 && (b<5 || (b===5 && c<1)))) { console.error('::error::npm '+process.argv[1]+' < 11.5.1: no trusted publishing'); process.exit(1); }
+          " "$(npm --version)"
+
+      - name: Sync package.json version
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
 
       - name: Create distribution tarball
         id: tarball
@@ -103,18 +108,3 @@ jobs:
             # SHA-256: ${{ steps.tarball.outputs.sha256 }}
             curl -fsSLO https://github.com/akasecurity/claude-tools/releases/download/${{ github.ref_name }}/aka-claude-tools-${{ steps.ver.outputs.version }}.tar.gz
             ```
-
-      - name: Sync package.json version
-        run: |
-          VERSION="${{ steps.ver.outputs.version }}"
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.version = '$VERSION';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-
-      - name: Publish to npm
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
