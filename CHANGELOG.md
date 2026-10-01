@@ -16,6 +16,10 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   `~/.claude-aka` used to switch to the new `aka-claude` default even when the profile had recorded
   an older name (such as `aka` or a custom one), leaving two launchers and overwriting the recorded
   alias. It now offers the recorded name as the default. Fresh installs still default to `aka-claude`.
+- **Launcher shim no longer overwrites a user file.** If `<profile>/bin/<name>` already exists and is not a
+  launcher shim written by this kit, the installer now leaves it untouched and treats the name as taken
+  (strict mode refuses; interactive mode offers another name). Previously it was silently replaced when that
+  `bin` directory was not on the installer's `PATH`. Kit-written shims are still refreshed on re-run.
 
 ## [0.5.0] guard-core, audit log, MCP gating and the aka-claude launcher shim
 
