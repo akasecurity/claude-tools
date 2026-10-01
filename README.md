@@ -151,7 +151,7 @@ Prefer a visual tour? See the [what's-inside carousel](media/decks/whats-inside.
 | `autoupdater-off` | Sets `DISABLE_AUTOUPDATER` to stop background updates; `claude update` still works. | ○ opt-in |
 
 `statusline` also has its own opt-in **sidecar**: set `CLAUDE_TOOLS_STATUS_SIDECAR_DIR` and it
-writes `<dir>/<session_id>.json` with the session's context-window usage, model, and cwd — fields
+writes `<dir>/<session_id>.json` with the session's context-window usage, model, and cwd — plus Claude Code's rate-limit windows (`rate_limits`: five-hour and seven-day usage and reset time) when it supplies them — fields
 Claude Code hands only to the status line — so a local tool can read them without scraping the
 rendered bar. Written atomically and only when a value actually changes; leaving the variable
 unset means no file and no change in behavior. Example, in `settings.json`:

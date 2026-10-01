@@ -8,6 +8,11 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+### Added
+- **Status sidecar `rate_limits`.** The opt-in status line sidecar now also mirrors Claude Code's five-hour and seven-day
+  rate-limit windows (usage and reset time) when Claude Code supplies them. Additive; nothing changes without
+  `CLAUDE_TOOLS_STATUS_SIDECAR_DIR`, and the rendered status line is unchanged.
+
 ### Removed
 - **`secure-research`** moved to `akasecurity/preflight-skills`, where it runs in every harness that
   preflight supports. It can now spread its researchers across the `claude`, `codex`, `agy` and

@@ -399,6 +399,14 @@ function writeAtomic(path: string, content: string): void {
 export interface SidecarPayload {
   v: 1; session_id: string; transcript_path: string | null; cwd: string | null; model_id: string | null;
   context_window: { used_percentage: number | null; context_window_size: number | null; total_input_tokens: number | null };
+  // Claude Code's own rate-limit windows, mirrored as given; present only when Claude Code supplies them.
+  rate_limits?: Partial<Record<'five_hour' | 'seven_day', { used_percentage: number | null; resets_at: string | null }>>;
+}
+// A reset time as an ISO string: ISO strings pass through; epoch seconds or ms (number or numeric string) are converted.
+function resetIso(v: unknown): string | null {
+  if (typeof v === 'string' && v && !/^[0-9]+$/.test(v) && !Number.isNaN(Date.parse(v))) return v;
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^[0-9]+$/.test(v) ? Number(v) : NaN;
+  return Number.isFinite(n) && n > 0 ? new Date((n < 1e12 ? n * 1000 : n)).toISOString() : null;
 }
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 export function sidecarPayload(input: HookInput): SidecarPayload | null {
@@ -406,11 +414,19 @@ export function sidecarPayload(input: HookInput): SidecarPayload | null {
   const modelId = typeof input.model === 'object' && input.model ? input.model.id ?? null
                 : typeof input.model === 'string' ? input.model : null;
   const cw = input.context_window ?? {};
+  const rate_limits: NonNullable<SidecarPayload['rate_limits']> = {};
+  for (const w of ['five_hour', 'seven_day'] as const) {
+    const win = input.rate_limits?.[w];
+    const used = num(win?.used_percentage ?? win?.utilization);
+    const resets_at = resetIso(win?.resets_at);
+    if (win && (used !== null || resets_at !== null)) rate_limits[w] = { used_percentage: used, resets_at };
+  }
   return {
     v: 1, session_id: input.session_id, transcript_path: input.transcript_path ?? null,
     cwd: input.workspace?.current_dir || input.cwd || null, model_id: modelId,
     context_window: { used_percentage: num(cw.used_percentage), context_window_size: num(cw.context_window_size),
                       total_input_tokens: num(cw.total_input_tokens) },
+    ...(Object.keys(rate_limits).length ? { rate_limits } : {}),
   };
 }
 export function sidecarPath(dir: string, sessionId: string): string | null {

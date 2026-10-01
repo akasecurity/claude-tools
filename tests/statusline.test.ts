@@ -113,6 +113,16 @@ eq('sidecarPayload maps fields', JSON.stringify(sidecarPayload(scIn)), JSON.stri
   v: 1, session_id: 'abc-123', transcript_path: '/t/abc-123.jsonl', cwd: '/w/proj', model_id: 'claude-opus-5-5',
   context_window: { used_percentage: 46, context_window_size: 1000000, total_input_tokens: 461076 },
 }));
+eq('sidecarPayload mirrors rate_limits when supplied',
+  JSON.stringify(sidecarPayload({ ...scIn, rate_limits: { five_hour: { used_percentage: 42, resets_at: '2026-10-01T00:00:00Z' }, seven_day: { utilization: 7 } } } as any)?.rate_limits),
+  JSON.stringify({ five_hour: { used_percentage: 42, resets_at: '2026-10-01T00:00:00Z' }, seven_day: { used_percentage: 7, resets_at: null } }));
+eq('sidecarPayload normalises epoch resets_at (number, numeric string, ms)',
+  JSON.stringify(Object.values(sidecarPayload({ ...scIn, rate_limits: { five_hour: { used_percentage: 1, resets_at: 1790000000 }, seven_day: { used_percentage: 2, resets_at: '1790000000' } } } as any)!.rate_limits!).map((w) => w!.resets_at)),
+  JSON.stringify(['2026-09-21T14:13:20.000Z', '2026-09-21T14:13:20.000Z']));
+eq('sidecarPayload epoch ms resets_at', sidecarPayload({ ...scIn, rate_limits: { five_hour: { used_percentage: 1, resets_at: 1790000000000 } } } as any)!.rate_limits!.five_hour!.resets_at, '2026-09-21T14:13:20.000Z');
+eq('sidecarPayload garbage resets_at → null', sidecarPayload({ ...scIn, rate_limits: { five_hour: { used_percentage: 1, resets_at: 'soon' } } } as any)!.rate_limits!.five_hour!.resets_at, null);
+eq('sidecarPayload keeps a reset time supplied without a percentage', JSON.stringify(sidecarPayload({ ...scIn, rate_limits: { five_hour: { resets_at: '2026-10-01T00:00:00Z' } } } as any)!.rate_limits), JSON.stringify({ five_hour: { used_percentage: null, resets_at: '2026-10-01T00:00:00Z' } }));
+eq('sidecarPayload omits rate_limits when absent or empty', 'rate_limits' in (sidecarPayload({ ...scIn, rate_limits: {} } as any) ?? {}), false);
 eq('sidecarPayload null without session_id', sidecarPayload({}), null);
 eq('sidecarPayload tolerates string model + missing ctx',
   JSON.stringify(sidecarPayload({ session_id: 'x', model: 'm' } as any)?.context_window),
