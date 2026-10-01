@@ -8,6 +8,11 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+### Changed
+- **The release workflow publishes to npm with trusted publishing (OIDC) and publishes before it creates the GitHub Release.**
+  No `NPM_TOKEN` secret is used any more; the workflow runs on Node 24 (trusted publishing needs npm 11.5.1+), and a
+  failed publish can no longer leave a GitHub Release without an npm package.
+
 ### Fixed
 - **`--delete-alias` keeps the profile's current alias record.** Deleting an older launcher alias left over from a
   rename no longer clears the profile's recorded alias; the record is cleared only when the deleted alias is the
