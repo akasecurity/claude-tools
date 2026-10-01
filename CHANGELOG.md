@@ -20,6 +20,10 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
   launcher shim written by this kit, the installer now leaves it untouched and treats the name as taken
   (strict mode refuses; interactive mode offers another name). Previously it was silently replaced when that
   `bin` directory was not on the installer's `PATH`. Kit-written shims are still refreshed on re-run.
+- **Alternate launcher name no longer shadows an existing alias.** When the launcher name is taken, the installer
+  offers an alternate (default `<name>2`). It now checks that alternate against aliases already defined in your
+  shell rc and the files it sources, not only against commands on `PATH`, and writes no alias instead of shadowing
+  yours.
 
 ## [0.5.0] guard-core, audit log, MCP gating and the aka-claude launcher shim
 
