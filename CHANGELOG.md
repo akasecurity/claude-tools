@@ -8,6 +8,8 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+## [0.5.2] plugin renamed to aka-claude-tools
+
 ### Changed
 - **Plugin renamed for 0.5.2: `claude-tools` is now `aka-claude-tools`** (the `plugin.json` name and the
   akasecurity marketplace entry). Claude Code's plugin validator reserves names that start with `claude-`,
@@ -386,7 +388,8 @@ state before the v0.2.0 public-ready prep.
 Initial internal deployment of the isolated-profile installer, the secure-defaults
 base, and the guard hooks.
 
-[Unreleased]: https://github.com/akasecurity/claude-tools/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/akasecurity/claude-tools/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/akasecurity/claude-tools/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/akasecurity/claude-tools/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/akasecurity/claude-tools/compare/v0.4.1...v0.5.0
 [0.4.0]: https://github.com/akasecurity/claude-tools/compare/v0.3.0...v0.4.0
