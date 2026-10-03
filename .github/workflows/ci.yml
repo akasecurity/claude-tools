@@ -56,7 +56,25 @@ jobs:
       - name: Install Claude Code CLI (for plugin validate)
         run: npm i -g @anthropic-ai/claude-code || true
       - name: Build + validate plugin
-        run: bash tools/build-plugin.sh && claude plugin validate --strict plugins/claude-tools
+        run: |
+          bash tools/build-plugin.sh
+          # #444: the maintainer approved exactly one --strict warning, the name "aka-claude-tools"
+          # reading as one of Anthropic's own. Allow that one message; every other warning
+          # or error still fails. --strict stays on.
+          allowed='Plugin name "aka-claude-tools" reads as one of Anthropic'
+          rc=0
+          out="$(claude plugin validate --strict plugins/claude-tools 2>&1)" || rc=$?
+          printf '%s\n' "$out"
+          [ "$rc" -eq 0 ] && exit 0
+          msgs="$(printf '%s\n' "$out" | grep -c '^ *❯ ' || true)"
+          errs="$(printf '%s\n' "$out" | grep -Ec 'Found [0-9]+ error' || true)"
+          known="$(printf '%s\n' "$out" | grep '^ *❯ ' | grep -c -F "$allowed" || true)"
+          if [ "$errs" -eq 0 ] && [ "$msgs" -eq 1 ] && [ "$known" -eq 1 ]; then
+            echo "only the approved name warning (#444) fired; passing"
+            exit 0
+          fi
+          echo "plugin validate failed beyond the approved #444 name warning" >&2
+          exit "$rc"
 
   leak-gate:
     name: leak — no new secrets/identifiers

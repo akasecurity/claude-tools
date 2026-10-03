@@ -5,7 +5,7 @@ fails=0
 bash tools/build-plugin.sh || { echo "FAIL: generator errored"; exit 1; }
 D=plugins/claude-tools
 # manifest present with correct name + version
-[[ "$(jq -r .name "$D/.claude-plugin/plugin.json")" == claude-tools ]] || { echo "FAIL name"; fails=1; }
+[[ "$(jq -r .name "$D/.claude-plugin/plugin.json")" == aka-claude-tools ]] || { echo "FAIL name"; fails=1; }
 [[ "$(jq -r .version "$D/.claude-plugin/plugin.json")" == "$(cat VERSION)" ]] || { echo "FAIL version"; fails=1; }
 # the three guards + launcher + preflight are present
 for f in command-guard.ts leak-guard.ts mcp-guard.ts bun-hook-launch.sh preflight.sh; do

@@ -8,6 +8,19 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+### Changed
+- **Plugin renamed for 0.5.2: `claude-tools` is now `aka-claude-tools`** (the `plugin.json` name and the
+  akasecurity marketplace entry). Claude Code's plugin validator reserves names that start with `claude-`,
+  so the old name could not stay. The repo, npm package, Homebrew formula and CLI keep their names. The old
+  `claude-tools@akasecurity` marketplace entry stays for one release as a pointer to the same plugin, then
+  goes away. **Reinstall to move over** (there is no in-place rename; do both steps so the guards do not
+  run twice):
+  1. `claude plugin uninstall claude-tools@akasecurity`
+  2. `claude plugin install aka-claude-tools@akasecurity`
+  `claude plugin validate --strict` warns that the new name reads as one of Anthropic's own (it contains
+  `claude` as a whole word). That one warning is accepted; CI allows exactly that message and fails
+  on any other.
+
 ## [0.5.1] launcher-name fixes, notify-osc and npm trusted publishing
 
 ### Changed
