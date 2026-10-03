@@ -29,12 +29,12 @@ bash tools/build-plugin.sh || { echo "FAIL: tools/build-plugin.sh errored"; exit
 mp="$tmp/marketplace"
 mkdir -p "$mp/.claude-plugin"
 cat > "$mp/.claude-plugin/marketplace.json" <<'EOF'
-{"name":"aka-smoke-test","owner":{"name":"AKA"},"plugins":[{"name":"claude-tools","source":"./plugin"}]}
+{"name":"aka-smoke-test","owner":{"name":"AKA"},"plugins":[{"name":"aka-claude-tools","source":"./plugin"}]}
 EOF
 cp -R plugins/claude-tools "$mp/plugin"
 
 "$claude_bin" plugin marketplace add "$mp" || { echo "FAIL: marketplace add"; exit 1; }
-"$claude_bin" plugin install claude-tools@aka-smoke-test || { echo "FAIL: plugin install"; exit 1; }
+"$claude_bin" plugin install aka-claude-tools@aka-smoke-test || { echo "FAIL: plugin install"; exit 1; }
 
 # With bun hidden (PATH stripped to /usr/bin:/bin and the launcher's fallback candidate
 # list overridden to a nonexistent path), a Bash tool call must STILL SUCCEED — proving

@@ -13,7 +13,7 @@ New to this? Hand the repo to Claude and it sets you up. Comfortable in a termin
 Read every hook first. It's all plain shell and TypeScript, MIT, and the guards scan
 locally: nothing is uploaded to run them.
 
-> Also known as `aka-claude-tools` (the npm package, Homebrew formula, and CLI name). Repo: `akasecurity/claude-tools`. The guard-hooks plugin installs as `claude-tools@akasecurity`.
+> Also known as `aka-claude-tools` (the npm package, Homebrew formula, and CLI name). Repo: `akasecurity/claude-tools`. The guard-hooks plugin installs as `aka-claude-tools@akasecurity`.
 
 From [akasecurity](https://akasecurity.io) · MIT · needs `jq` + `bun`.
 
@@ -94,7 +94,7 @@ not a bare sandbox. Prefer a walkthrough? See the [safe-setup carousel](media/de
 
 ### Install as a Claude Code plugin (guards into your active profile)
 
-`claude plugin marketplace add akasecurity/marketplace` then `claude plugin install claude-tools@akasecurity` installs the guard hooks (command-guard, leak-guard, mcp-guard) into your **active** profile.
+`claude plugin marketplace add akasecurity/marketplace` then `claude plugin install aka-claude-tools@akasecurity` installs the guard hooks (command-guard, leak-guard, mcp-guard) into your **active** profile.
 
 - **Requires `bun`.** The guards run under bun. They **fail open** — if bun is missing they never
   block your work; instead you get one clear "guards INACTIVE" notice at session start. Install bun

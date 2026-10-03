@@ -9,7 +9,7 @@ rm -rf "$OUT"; mkdir -p "$OUT/.claude-plugin" "$HK"
 
 # manifest
 jq -n --arg v "$(cat VERSION)" '{
-  name:"claude-tools", version:$v, author:{name:"AKA Security"},
+  name:"aka-claude-tools", version:$v, author:{name:"AKA Security"},
   homepage:"https://akasecurity.io", repository:"https://github.com/akasecurity/claude-tools",
   description:"AKA Claude Tools guard hooks (command-guard, leak-guard, mcp-guard, post-guard) for your active profile. Requires bun. If bun is missing, the guards fail OPEN (the tool call proceeds) and announce themselves inactive at session start; with bun present, mcp-guard blocks on its own errors. For the full hardened ISOLATED profile (credential-read denies, rtk-safe permission allowlist, status line, alias), install the full kit — see the project README for npm, Homebrew, and installer options."
 }' > "$OUT/.claude-plugin/plugin.json"
