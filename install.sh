@@ -36,6 +36,8 @@
 # mechanics above. Targeting an existing dir here simply layers on top.
 #
 # Flags:
+#   -h, --help         Print usage and exit 0, before anything else runs. Changes
+#                      nothing. An unknown flag prints usage and exits 2.
 #   --defaults         non-interactive; accept every default (config ~/.claude-aka,
 #                      launcher `aka-claude`, recommended additions, no copy of
 #                      existing config).
@@ -98,6 +100,50 @@
 
 set -euo pipefail
 
+# usage — the --help text. Printed by -h/--help (stdout, exit 0) and on an unknown
+# flag (stderr, exit 2). Pure printf: no file reads, no writes.
+usage() {
+  cat <<'USAGE'
+Usage: install.sh [FLAGS]
+
+Creates (or updates in place) an isolated Claude Code config folder, layers on the
+aka-claude-tools additions you pick, and writes a launcher alias. With no flags it
+runs interactively and asks for the folder (default ~/.claude-aka), the launcher
+name (default aka-claude) and the additions. Re-running layers in place: unchecked
+additions are removed, your own rules, hooks and files are kept.
+
+Flags:
+  -h, --help         Print this help and exit. Changes nothing.
+  -V, --version      Print the kit version and exit.
+  --defaults         Non-interactive; accept every default (~/.claude-aka,
+                     launcher aka-claude, the recommended additions).
+  --no-auth-inherit  Do not seed the new profile's login from your existing one
+                     (use when the profile is for a different account).
+  --apply            Engine mode: layer $CT_ADDITIONS onto $CT_CONFIG_DIR and exit.
+                     No prompts, no alias, no auth. Requires CT_CONFIG_DIR + CT_ADDITIONS.
+  --alias            Create/check the launcher alias $CT_ALIAS -> $CT_CONFIG_DIR
+                     (shell rc block + <profile>/bin shim) and exit.
+                     Requires CT_CONFIG_DIR + CT_ALIAS.
+  --delete-alias     Remove the managed alias block and shim for $CT_ALIAS and exit.
+                     Requires CT_ALIAS; CT_CONFIG_DIR optional (cross-profile check).
+  --enumerate        List the Claude Code profiles and launcher aliases found here and exit.
+  --audit-log [--month YYYY-MM] [PROFILE_DIR]
+                     Read-only: print one profile's security-event audit log.
+  --audit [PROFILE_DIR]
+                     Read-only: check one profile against its integrity manifest
+                     (exit 0 clean, 1 on drift).
+
+Environment: CT_CONFIG_DIR (target profile dir), CT_ADDITIONS (comma-separated
+addition ids), CT_ALIAS (launcher name), CT_NONINTERACTIVE=1, NO_COLOR.
+
+An unknown flag prints this help and exits 2 without installing anything.
+See README.md and agent-install.md for the full walkthrough.
+USAGE
+}
+for _a in "$@"; do
+  case "$_a" in -h|--help) usage; exit 0 ;; esac
+done
+
 REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_SRC="$REPO_DIR/config"
 # Single source of truth for the kit version — also git-tagged and recorded in
@@ -121,8 +167,8 @@ CT_AUDIT_MONTH="${CT_AUDIT_MONTH:-}"
 # audit_log_entry). Captured ONLY when --audit-log or --audit is present ANYWHERE in "$@" —
 # checked via this pre-scan, not the (not-yet-set) $CT_AUDIT_LOG_MODE inside the
 # single pass below, since --audit-log can appear AFTER the positional in
-# invocation order. Every other mode keeps the previous handling of an unknown
-# arg: silently ignored, never captured.
+# invocation order. In every other mode a bare positional is ignored, never
+# captured; an unknown FLAG (anything starting with -) prints usage and exits 2.
 # `--audit [PROFILE_DIR]` takes the same optional positional, captured the same way.
 CT_AUDIT_MODE=0
 CT_AUDIT_PROFILE_ARG=""
@@ -148,6 +194,7 @@ for arg in "$@"; do
     --audit-log)       CT_AUDIT_LOG_MODE=1; export CT_NONINTERACTIVE=1 ;;
     --audit)           CT_AUDIT_MODE=1; export CT_NONINTERACTIVE=1 ;;
     --month)           _prev_flag="--month" ;;
+    -*)                printf 'install.sh: unknown flag: %s\n\n' "$arg" >&2; usage >&2; exit 2 ;;
     *)                 [ "$_audit_log_requested" = "1" ] && CT_AUDIT_PROFILE_ARG="$arg" ;;
   esac
 done

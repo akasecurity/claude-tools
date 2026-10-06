@@ -85,7 +85,11 @@ git clone git@github.com:akasecurity/claude-tools.git
 cd claude-tools
 ./install.sh             # interactive
 ./install.sh --defaults  # accept the recommended ten
+./install.sh --help      # every flag and env var; changes nothing
 ```
+
+`--help` (or `-h`) prints the flags and exits before anything runs. An unknown flag prints the same
+help and exits 2 instead of installing.
 
 Nothing runs on clone. Read the code first if you like. The installer asks where to put
 the profile, what to name the launcher, and which pieces to enable, and migrates your
