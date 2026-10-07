@@ -25,7 +25,7 @@ echo "test_scn_edge_concurrency:"
 SB="$(sandbox)"; touch "$SB/.bashrc"; P="$SB/.claude-aka"
 SEL="secure-settings"
 run() { CT_ADDITIONS="$SEL" SHELL=/bin/bash HOME="$SB" "$@" \
-        bash "$REPO_ROOT/install.sh" --clean --defaults --no-auth-inherit; }
+        bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit; }
 
 # ── (1) baseline install + plant precious, unrecoverable user state ────────────
 CT_ADDITIONS="$SEL" SHELL=/bin/bash HOME="$SB" \
@@ -49,7 +49,7 @@ COLLIDE="$P.backup-FIXEDTS"
 mkdir -p "$COLLIDE"; echo "leftover backup from a same-second run" > "$COLLIDE/marker"
 
 PATH="$SHIM:$PATH" CT_ADDITIONS="$SEL" SHELL=/bin/bash HOME="$SB" \
-  bash "$REPO_ROOT/install.sh" --clean --defaults --no-auth-inherit >"$SB/log" 2>&1
+  bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$SB/log" 2>&1
 rc=$?
 
 # ── (3) the install must NOT silently destroy the user's state ──────────────────

@@ -8,6 +8,17 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 
 ## [Unreleased]
 
+### Fixed
+- **`install.sh --help` no longer installs.** `-h`/`--help` now prints usage and exits 0 before anything
+  runs; previously the flag was ignored and the install went ahead. An unknown flag now prints usage and
+  exits 2 instead of being silently ignored.
+- **The gcloud credential deny is narrowed to the credential files.** `Read(~/.config/gcloud/**)` also blocked
+  harmless reads such as listing `configurations/`. It is replaced by denies on `credentials.db`,
+  `access_tokens.db`, `legacy_credentials/**` and `application_default_credentials.json`, so configurations,
+  properties and logs stay readable. A new `Read(~/.config/gcloud-sa/**)` covers service-account key files
+  kept outside the gcloud config dir. The old rule is retired in `managed-permissions.json`, so an upgrade
+  offers to drop it from existing profiles.
+
 ## [0.5.2] plugin renamed to aka-claude-tools
 
 ### Changed

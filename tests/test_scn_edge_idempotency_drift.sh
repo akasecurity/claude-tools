@@ -40,9 +40,9 @@ echo "CONV-SENTINEL"         > "$PROFILE/projects/p/memory/conv.md"
 BK="$PROFILE.backup-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BK"
 
-# 4. run a --clean rebuild → it should converge (preserve state), not reset.
+# 4. re-run the install → it should converge (preserve state), not reset.
 CT_ADDITIONS="$ALL" SHELL=/bin/bash HOME="$SB" \
-  bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit --clean >"$SB/log1" 2>&1
+  bash "$REPO_ROOT/install.sh" --defaults --no-auth-inherit >"$SB/log1" 2>&1
 rc=$?
 
 # The live profile MUST still hold the user's data after the rebuild.
