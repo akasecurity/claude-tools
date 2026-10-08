@@ -63,6 +63,96 @@ const BOOTSTRAP_STALE_NOTICE = '⚠️ command-guard: aka-claude-tools.config ch
 
 interface HookInput { tool_name?: string; tool_input?: Record<string, unknown> | string; cwd?: unknown }
 
+// ── BSD pkill/pgrep misordering ────────────────────────────────────────────────────────
+// BSD/macOS pkill and pgrep stop option parsing at the first pattern, so in
+// `pkill -f foo -u 501 --` the `-u`, `501` and `--` become extra OR'd patterns, and almost
+// every process command line contains `--`. GNU pkill permutes options, so this runs on
+// macOS only. A small quote-aware segmenter: simple commands split on ; && || | & newline ( );
+// quoted strings, $(...) and backticks are one word; redirections and their targets are dropped.
+const PKILL_WRAPPERS: Record<string, string> = { sudo: 'ughpCDRTU', env: 'uSC', command: '', exec: '', nohup: '', time: '', rtk: '' };
+const PKILL_VALUE_OPTS = 'dFGgPstUu';
+const PKILL_REDIR = /^(?:\d*|&)(?:>>|>&|<&|>|<)/;
+
+function shellSegments(cmd: string): string[][] {
+  const segs: string[][] = [];
+  let words: string[] = [];
+  let cur = '';
+  let has = false;
+  const endWord = () => { if (has) words.push(cur); cur = ''; has = false; };
+  const endSeg = () => { endWord(); if (words.length) segs.push(words); words = []; };
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (c === '\\') { cur += cmd[i + 1] ?? ''; has = true; i++; continue; }
+    if (c === "'") {
+      const j = cmd.indexOf("'", i + 1);
+      const end = j < 0 ? cmd.length : j;
+      cur += cmd.slice(i + 1, end); has = true; i = end; continue;
+    }
+    if (c === '"' || c === '`' || (c === '$' && cmd[i + 1] === '(')) {
+      // Scan to the matching close; $(...) and backticks nest, and inside "..." a \ escapes.
+      let depth = 0; let k = i;
+      const open = c;
+      for (; k < cmd.length; k++) {
+        const d = cmd[k];
+        if (d === '\\') { k++; continue; }
+        if (open === '"') {
+          if (k > i && d === '"' && depth === 0) break;
+          if (d === '$' && cmd[k + 1] === '(') depth++;
+          else if (d === ')' && depth > 0) depth--;
+        } else if (open === '`') {
+          if (k > i && d === '`') break;
+        } else {
+          if (d === '(') depth++;
+          else if (d === ')' && --depth === 0) break;
+        }
+      }
+      cur += cmd.slice(i, k + 1); has = true; i = k; continue;
+    }
+    if (c === '&' && (cmd[i + 1] === '>' || (cur !== '' && /[<>]$/.test(cur)))) { cur += c; has = true; continue; }
+    if (';&|()\n'.includes(c)) { endSeg(); continue; }
+    if (c === ' ' || c === '\t') { endWord(); continue; }
+    cur += c; has = true;
+  }
+  endSeg();
+  return segs;
+}
+
+// Returns a block reason when `cmd` runs pkill/pgrep with a word after its first pattern.
+function misorderedPkill(cmd: string, platform: string = process.platform): string | null {
+  if (platform !== 'darwin' || !/pkill|pgrep/.test(cmd)) return null;
+  for (const raw of shellSegments(cmd)) {
+    const w: string[] = [];
+    for (let i = 0; i < raw.length; i++) {
+      const m = PKILL_REDIR.exec(raw[i]);
+      if (m) { if (m[0].length === raw[i].length) i++; continue; }
+      w.push(raw[i]);
+    }
+    let i = 0;
+    for (;;) {
+      if (i < w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i])) { i++; continue; }
+      const base = (w[i] ?? '').split('/').pop() as string;
+      if (!Object.prototype.hasOwnProperty.call(PKILL_WRAPPERS, base)) break;
+      const wrap = PKILL_WRAPPERS[base];
+      i++;
+      while (i < w.length && w[i].startsWith('-') && w[i] !== '--') {
+        i += w[i].length === 2 && wrap.includes(w[i][1]) ? 2 : 1;
+      }
+    }
+    const name = (w[i] ?? '').split('/').pop();
+    if (name !== 'pkill' && name !== 'pgrep') continue;
+    i++;
+    for (; i < w.length; i++) {
+      const t = w[i];
+      if (t === '--') { i++; break; }
+      if (!t.startsWith('-') || t === '-') break;
+      if (/^-(?:\d+|[A-Z]{2,}[A-Z0-9]*)$/.test(t)) continue; // signal: -9, -TERM, -HUP
+      if (PKILL_VALUE_OPTS.includes(t[t.length - 1])) i++;
+    }
+    if (i < w.length && w.length > i + 1) return name as string;
+  }
+  return null;
+}
+
 // Messages are the kit's public contract; tests/golden pins them. Keys are guard-core RuleIds.
 const BLOCK_MSG: Record<RuleId, (detail?: string) => string> = {
   'pipe-to-shell': () => '🚨 BLOCKED (command-guard): piping output into a shell interpreter (curl … | bash). Download, inspect, then run.',
@@ -225,6 +315,14 @@ async function main(): Promise<void> {
   const command = typeof input.tool_input === 'string'
     ? input.tool_input : (input.tool_input?.command as string | undefined) ?? '';
   if (!command) process.exit(0);
+
+  try {
+    const bad = misorderedPkill(command);
+    if (bad) {
+      console.error(P + `🚨 BLOCKED (command-guard): on macOS ${bad} stops parsing options at the first pattern, so any option or word after it (-u, a uid, --) is treated as another pattern and can match almost every process. Put options first and give one pattern (join several with |): \`${bad} -u "$(id -u)" -f '<pattern>'\`. Preview matches with \`pgrep -lf\`.`);
+      process.exit(2);
+    }
+  } catch { /* a parser bug must never block or crash the hook */ }
 
   type Core = typeof import('./lib/guard-core.js');
   let core: Core;
