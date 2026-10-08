@@ -57,6 +57,52 @@ const FALLBACK_OUTBOUND = /\b(curl|wget|nc|ncat|socat|fetch)\b/i;
 const PIPE_TO_SHELL_RAW = /\|&?\s*(?:(?:\S*\/)?env\s+(?:\S+\s+)*)?(?:\S*\/)?(?:sh|bash|zsh)\b/i;
 const STARTUP_WRITE_RAW = /(?:>|\btee\b|\bsed\b|\bcp\b|\bmv\b|\binstall\b|\bln\b|\bdd\b)[^\n]*\.(?:zshrc|zshenv|zprofile|bashrc|bash_profile|profile)\b/;
 const SEARCH_EXEC_RAW = /(?:^|[\s'"])--(?:pre|hostname-bin)(?![\w-])|RIPGREP_CONFIG_PATH=/;
+// ── Heredoc bodies ─────────────────────────────────────────────────────────────────────
+// A heredoc body fed to a data consumer (cat, tee, oharness send --stdin, python3 -, git commit -F -)
+// is text, not shell: a handoff note that mentions `curl … | bash` or `.zshenv` is not that
+// command. guard-core's structural rules read raw text, so they see the body as commands. A body
+// fed to a shell (sh/bash/zsh/…, ssh, eval, source) IS code and stays visible to every rule.
+const HEREDOC_SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'fish', 'ssh', 'eval', 'source', '.', 'exec']);
+const HEREDOC_WRAPPERS = new Set(['sudo', 'env', 'command', 'nohup', 'time', 'rtk', 'xargs', 'doas']);
+
+function heredocConsumer(before: string): string {
+  const seg = before.split(/&&|\|\||[;|&(]/).pop() ?? '';
+  for (const w of seg.trim().split(/\s+/)) {
+    if (!w || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w) || w.startsWith('-')) continue;
+    const base = w.replace(/^['"]|['"]$/g, '').split('/').pop() as string;
+    if (HEREDOC_WRAPPERS.has(base)) continue;
+    return base;
+  }
+  return '';
+}
+
+// `code` is the command with data bodies removed; `flat` keeps them, appended to the line that
+// opened them with shell metacharacters blanked: secret scanning still sees every byte, the
+// structural rules see only inert words.
+function splitDataHeredocs(cmd: string): { code: string; flat: string; hasData: boolean } {
+  const code: string[] = [];
+  const flat: string[] = [];
+  let hasData = false;
+  const pending: { tag: string; dash: boolean; data: boolean }[] = [];
+  for (const line of cmd.split('\n')) {
+    if (pending.length) {
+      const { tag, dash, data } = pending[0];
+      const end = (dash ? line.replace(/^\t+/, '') : line) === tag;
+      if (end) pending.shift();
+      if (!data) { code.push(line); flat.push(line); }
+      else if (!end) flat[flat.length - 1] += ' ' + line.replace(/[|<>&;()`'"\\$#]/g, ' ');
+      continue;
+    }
+    code.push(line); flat.push(line);
+    for (const m of line.matchAll(/(?<!<)<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g)) {
+      const data = !HEREDOC_SHELLS.has(heredocConsumer(line.slice(0, m.index)));
+      if (data) hasData = true;
+      pending.push({ tag: m[3], dash: m[1] === '-', data });
+    }
+  }
+  return { code: code.join('\n'), flat: flat.join('\n'), hasData };
+}
+
 const CORE_MISSING_NOTICE = '⚠️ command-guard: the guard-core library is missing, unreadable or incompatible — only conservative fallback checks ran. Reinstall to restore config/hooks/lib/guard-core.js.';
 const BOOTSTRAP_UNREADABLE_NOTICE = '⚠️ command-guard: trusted-bootstrap.json is unreadable — no bootstrap exemptions apply.';
 const BOOTSTRAP_STALE_NOTICE = '⚠️ command-guard: aka-claude-tools.config changed since install — re-run the installer to recompile the trusted bootstrap list.';
@@ -377,12 +423,18 @@ async function main(): Promise<void> {
   let d: ReturnType<Core['evaluateBash']>;
   try {
     patterns = core.parsePatterns(loadPatternsRaw());
-    d = core.evaluateBash(command, {
-      patterns,
-      org: loadOrgTier(),
-      scanSecrets,
-      trustedBootstrap,
-    });
+    const ctx = { patterns, org: loadOrgTier(), scanSecrets, trustedBootstrap };
+    const hd = splitDataHeredocs(command);
+    if (!hd.hasData) {
+      d = core.evaluateBash(command, ctx);
+    } else {
+      // Structural rules see the command without data bodies; the secret tier sees the bodies
+      // too, but only when an outbound tool is in the command itself.
+      d = core.evaluateBash(hd.code, { ...ctx, scanSecrets: false });
+      if (d && d.kind === 'allow' && scanSecrets && (patterns ? patterns.outbound : FALLBACK_OUTBOUND).test(hd.code)) {
+        d = core.evaluateBash(hd.flat, ctx);
+      }
+    }
     // Only allow/block are valid Bash decisions; anything else (including `rewrite`) is a
     // malformed decision and takes the core-unavailable path.
     if (!d || typeof d !== 'object' || !Array.isArray(d.notices) || (d.kind !== 'allow' && d.kind !== 'block')) {
