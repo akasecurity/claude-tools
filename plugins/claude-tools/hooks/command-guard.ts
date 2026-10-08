@@ -117,9 +117,26 @@ function shellSegments(cmd: string): string[][] {
   return segs;
 }
 
+// Drops heredoc bodies: their lines are data (a handoff note that mentions pgrep), not commands.
+function stripHeredocs(cmd: string): string {
+  const out: string[] = [];
+  let pending: { tag: string; dash: boolean }[] = [];
+  for (const line of cmd.split('\n')) {
+    if (pending.length) {
+      const { tag, dash } = pending[0];
+      if ((dash ? line.replace(/^\t+/, '') : line) === tag) pending.shift();
+      continue;
+    }
+    out.push(line);
+    for (const m of line.matchAll(/(?<!<)<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g)) pending.push({ tag: m[3], dash: m[1] === '-' });
+  }
+  return out.join('\n');
+}
+
 // Returns a block reason when `cmd` runs pkill/pgrep with a word after its first pattern.
 function misorderedPkill(cmd: string, platform: string = process.platform): string | null {
   if (platform !== 'darwin' || !/pkill|pgrep/.test(cmd)) return null;
+  cmd = stripHeredocs(cmd);
   for (const raw of shellSegments(cmd)) {
     const w: string[] = [];
     for (let i = 0; i < raw.length; i++) {

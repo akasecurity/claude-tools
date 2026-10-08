@@ -44,6 +44,9 @@ if [ "$(uname -s)" = Darwin ]; then
   chk 0 "allow: quoted ssh argument is not inspected"  "ssh h 'pkill -f foo -u 501'"
   chk 0 "allow: pkill only as an echo argument"        'echo pkill -f foo bar'
   chk 0 "allow: bare pkill"                            'pkill'
+  chk 0 "allow: pgrep only in a quoted heredoc body"   $'cat > /tmp/n <<\'EOF\'\nHost clear (pgrep gate empty) --\nEOF'
+  chk 2 "block: real pkill after a heredoc ends"       $'cat <<EOF\nx\nEOF\npkill -f foo -u 501'
+  chk 2 "block: pkill on the heredoc command line"     $'pkill -f foo -u 501 <<EOF\nx\nEOF'
 else
   chk 0 "allow on non-macOS: GNU pkill permutes options" 'pkill -f foo -u 501'
 fi
