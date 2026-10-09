@@ -77,7 +77,7 @@ interface State {
   git: { isRepo: boolean; repo: string; branch: string; dirty: number;
          ahead: number; behind: number; stash: number; worktree: string };
   pr: { number: string; state: string };
-  usage: { has: boolean; five: number; week: number; fiveReset: string; weekReset: string;
+  usage: { has: boolean; five: number; week: number | null; fiveReset: string; weekReset: string;
            extraEnabled: boolean; extraUsed: number; extraLimit: number };
   lines: { added: number; removed: number };
   ambient: { time: string; weather: string; locText: string; flag: string; sessionUpper: string };
@@ -305,7 +305,9 @@ export function render(state: State): string {
     const r5 = u.fiveReset ? ` ${AKA_FAINT}↻${u.fiveReset}${RESET}` : '';
     const r7 = u.weekReset ? ` ${AKA_FAINT}↻${u.weekReset}${RESET}` : '';
     l2 += `${pipe()}${AKA_DIM}5H${RESET} ${levelColor(u.five)}${u.five}%${RESET}${r5}`;
-    l2 += `${pipe()}${AKA_DIM}WK${RESET} ${levelColor(u.week)}${u.week}%${RESET}${r7}`;
+    l2 += u.week === null
+      ? `${pipe()}${AKA_DIM}WK${RESET} ${AKA_DIM}–${RESET}`
+      : `${pipe()}${AKA_DIM}WK${RESET} ${levelColor(u.week)}${u.week}%${RESET}${r7}`;
     if (u.extraEnabled) l2 += `${pipe()}${AKA_DIM}+$${u.extraUsed}/$${u.extraLimit}${RESET}`;
   }
   if (state.lines.added > 0 || state.lines.removed > 0) {
@@ -654,9 +656,16 @@ async function gatherWeather(tempUnit: string): Promise<string> {
   return cached || '—';
 }
 
+// A window's percent, or null when the plan reports none (team seats have no weekly window),
+// so the caller can show "–" instead of a misleading 0%.
+export function windowPct(w: { used_percentage?: number; utilization?: number } | null | undefined): number | null {
+  const v = w?.used_percentage ?? w?.utilization;
+  return v == null ? null : toInt(v);
+}
+
 // ── gather: usage (native rate_limits from CC JSON, or the OAuth usage API) ──
 interface UsageRaw {
-  five: number; week: number; fiveResetRaw: string; weekResetRaw: string;
+  five: number; week: number | null; fiveResetRaw: string; weekResetRaw: string;
   extraEnabled: boolean; extraUsed: number; extraLimit: number; noData: boolean; cacheExists: boolean;
 }
 async function gatherUsage(input: HookInput): Promise<UsageRaw> {
@@ -664,7 +673,7 @@ async function gatherUsage(input: HookInput): Promise<UsageRaw> {
   if (rl != null) {
     return {
       five: toInt(rl.five_hour?.used_percentage ?? rl.five_hour?.utilization ?? 0),
-      week: toInt(rl.seven_day?.used_percentage ?? rl.seven_day?.utilization ?? 0),
+      week: windowPct(rl.seven_day),
       fiveResetRaw: rl.five_hour?.resets_at ?? '',
       weekResetRaw: rl.seven_day?.resets_at ?? '',
       extraEnabled: rl.extra_usage?.is_enabled ?? false,
@@ -696,7 +705,7 @@ async function gatherUsage(input: HookInput): Promise<UsageRaw> {
   if (cache && ageSeconds(USAGE_CACHE) < 1800) {
     return {
       five: toInt(cache.five_hour?.utilization ?? 0),
-      week: toInt(cache.seven_day?.utilization ?? 0),
+      week: windowPct(cache.seven_day),
       fiveResetRaw: cache.five_hour?.resets_at ?? '',
       weekResetRaw: cache.seven_day?.resets_at ?? '',
       extraEnabled: cache.extra_usage?.is_enabled ?? false,
@@ -771,7 +780,7 @@ export async function gather(input: HookInput, settings: Settings): Promise<Stat
     }
   }
   const e5 = parseEpoch(fiveResetRaw), e7 = parseEpoch(weekResetRaw);
-  const usageHas = !usageRaw.noData && (usageRaw.five > 0 || usageRaw.week > 0 || usageRaw.cacheExists);
+  const usageHas = !usageRaw.noData && (usageRaw.five > 0 || (usageRaw.week ?? 0) > 0 || usageRaw.cacheExists);
 
   const prNumber = input.pr?.number != null ? String(input.pr.number) : '';
   const sessionUpper = (input.session_name || '').toUpperCase();

@@ -11,7 +11,7 @@
 // this so the test_*.sh glob in run.sh picks it up). Exits non-zero if any assert fails.
 import {
   render, stringWidth, truncateToWidth, parseEpoch, deriveModel, widthMode, meter, levelColor,
-  sidecarPayload, sidecarPath, writeSidecar,
+  sidecarPayload, sidecarPath, writeSidecar, windowPct,
 } from '../config/hooks/statusline.ts';
 import { mkdtempSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -161,6 +161,17 @@ eq('writeSidecar env unset writes nothing', writeSidecar(scIn, undefined), null)
     process.env.HOME = realHome;
   }
 }
+
+// ── plans with no weekly window (e.g. team seats) ─────────────────────────────
+const noWeek = render({ ...normal, usage: { ...normal.usage, week: null, weekReset: '' } });
+ok('missing weekly window renders WK –, not 0%', noWeek.includes('WK\x1b[0m \x1b[38;2;107;125;143m–\x1b[0m') && !noWeek.includes('0%\x1b[0m \x1b[38;2;61;78;94m↻WED'));
+ok('missing weekly window keeps the 5H meter', noWeek.includes('55%'));
+ok('a real 0% weekly window still renders 0%', render({ ...normal, usage: { ...normal.usage, week: 0 } }).includes('0%'));
+eq('windowPct: absent window is null', windowPct(undefined), null);
+eq('windowPct: empty window object is null', windowPct({}), null);
+eq('windowPct: used_percentage read', windowPct({ used_percentage: 42.9 }), 42);
+eq('windowPct: utilization fallback', windowPct({ utilization: 7 }), 7);
+eq('windowPct: explicit 0 stays 0', windowPct({ used_percentage: 0 }), 0);
 
 console.log(`  \x1b[1m${pass} passed, ${fail} failed\x1b[0m`);
 process.exit(fail > 0 ? 1 : 0);
