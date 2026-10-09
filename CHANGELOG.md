@@ -9,6 +9,9 @@ Pre-1.0: minor versions may carry breaking changes; they are called out below.
 ## [Unreleased]
 
 ### Fixed
+- **command-guard blocks BSD `pkill`/`pgrep` with a word after the first pattern (macOS only).** BSD option
+  parsing stops at the first pattern, so `pkill -f foo -u 501 --` treats `-u`, `501` and `--` as extra OR'd
+  patterns and matches almost every process. The block message says to put options first and join patterns with `|`.
 - **`install.sh --help` no longer installs.** `-h`/`--help` now prints usage and exits 0 before anything
   runs; previously the flag was ignored and the install went ahead. An unknown flag now prints usage and
   exits 2 instead of being silently ignored.
